@@ -15,6 +15,8 @@ no necesita servidor ni instalación.
 - ⏸ **Pausa** y ⏹ **Parar** en cualquier momento.
 - 🟦 **Resalta el párrafo que se está leyendo** y desplaza la página para
   seguirlo.
+- 📐 El PDF **se ajusta automáticamente al ancho de la pantalla** (ideal en el
+  móvil) y tiene **controles de zoom** (A−, Ajustar, A+).
 - ⌨️ Atajo: barra espaciadora para leer / pausar.
 
 ## 🚀 Cómo usar

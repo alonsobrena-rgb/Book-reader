@@ -109,6 +109,15 @@ input[type="range"] {
 .btn:hover:not(:disabled) { filter: brightness(1.15); }
 .btn:disabled { opacity: 0.45; cursor: not-allowed; }
 
+.btn--icon {
+  padding: 7px 10px;
+  font-size: 0.82rem;
+  min-width: 38px;
+  justify-content: center;
+}
+
+.toolbar__group--zoom { gap: 6px; }
+
 .btn--file { background: var(--accent-strong); border-color: var(--accent-strong); }
 .btn--play { background: var(--play); border-color: var(--play); color: #08220f; }
 .btn--pause { background: var(--pause); border-color: var(--pause); color: #3a2600; }
@@ -119,8 +128,9 @@ input[type="range"] {
   position: relative;
   flex: 1;
   overflow-y: auto;
-  overflow-x: hidden;
+  overflow-x: auto;
   padding: 24px 0 80px;
+  -webkit-overflow-scrolling: touch;
   scroll-behavior: smooth;
 }
 

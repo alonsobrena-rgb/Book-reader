@@ -24,6 +24,9 @@
   const playBtn     = document.getElementById('playBtn');
   const pauseBtn    = document.getElementById('pauseBtn');
   const stopBtn     = document.getElementById('stopBtn');
+  const zoomInBtn   = document.getElementById('zoomInBtn');
+  const zoomOutBtn  = document.getElementById('zoomOutBtn');
+  const zoomFitBtn  = document.getElementById('zoomFitBtn');
   const viewer      = document.getElementById('viewer');
   const emptyState  = document.getElementById('emptyState');
 
@@ -32,7 +35,8 @@
   // ---- Estado global ----
   const state = {
     pdfDoc: null,
-    scale: 1.5,
+    fitScale: 1,        // escala para ajustar la página al ancho del visor
+    zoom: 1,            // multiplicador de zoom del usuario
     pageEls: [],        // contenedores .page por página
     paragraphs: [],     // lista plana de párrafos en orden de lectura
     highlightEl: null,  // único elemento de resaltado reutilizable
@@ -42,6 +46,11 @@
     voices: [],
     keepAliveTimer: null,
   };
+
+  // Escala efectiva de render = ajuste al ancho * zoom del usuario.
+  function currentScale() {
+    return state.fitScale * state.zoom;
+  }
 
   /* ====================================================================
    * 1. VOCES
@@ -132,9 +141,27 @@
       return;
     }
 
-    // Limpia el visor.
+    state.zoom = 1;
+    await computeFitScale();
+    await renderAllPages();
+
+    updateControls();
+    hideToast();
+    showToast(`PDF cargado: ${state.pdfDoc.numPages} páginas`, 2000);
+  }
+
+  // Calcula la escala para que la página ocupe el ancho disponible del visor.
+  async function computeFitScale() {
+    const page = await state.pdfDoc.getPage(1);
+    const vp = page.getViewport({ scale: 1 });
+    const avail = Math.max(280, viewer.clientWidth - 24); // margen para sombra
+    state.fitScale = avail / vp.width;
+  }
+
+  // (Re)construye todas las páginas y párrafos con la escala actual.
+  async function renderAllPages() {
+    stopReading();
     viewer.innerHTML = '';
-    emptyState.remove?.();
     state.pageEls = [];
     state.paragraphs = [];
     state.currentIndex = -1;
@@ -149,17 +176,13 @@
     for (let n = 1; n <= state.pdfDoc.numPages; n++) {
       await preparePage(n);
     }
-
     setupLazyRendering();
-    updateControls();
-    hideToast();
-    showToast(`PDF cargado: ${state.pdfDoc.numPages} páginas`, 2000);
   }
 
   // Crea el contenedor de la página, fija su tamaño y construye los párrafos.
   async function preparePage(pageNum) {
     const page = await state.pdfDoc.getPage(pageNum);
-    const viewport = page.getViewport({ scale: state.scale });
+    const viewport = page.getViewport({ scale: currentScale() });
 
     const pageEl = document.createElement('div');
     pageEl.className = 'page';
@@ -188,7 +211,7 @@
 
     const pageNum = Number(pageEl.dataset.pageNum);
     const page = await state.pdfDoc.getPage(pageNum);
-    const viewport = page.getViewport({ scale: state.scale });
+    const viewport = page.getViewport({ scale: currentScale() });
 
     const canvas = document.createElement('canvas');
     canvas.width = viewport.width;
@@ -503,7 +526,54 @@
     pauseBtn.disabled = !state.isReading || state.isPaused;
     stopBtn.disabled = !state.isReading;
     playBtn.textContent = state.isPaused ? '▶ Reanudar' : '▶ Leer';
+
+    const hasPdf = !!state.pdfDoc;
+    zoomInBtn.disabled = !hasPdf || state.zoom >= 3;
+    zoomOutBtn.disabled = !hasPdf || state.zoom <= 0.5;
+    zoomFitBtn.disabled = !hasPdf;
   }
+
+  // Vuelve a maquetar las páginas (zoom o cambio de tamaño de pantalla),
+  // conservando aproximadamente la página que estaba arriba.
+  let relayoutPending = false;
+  async function relayout(recomputeFit) {
+    if (!state.pdfDoc || relayoutPending) return;
+    relayoutPending = true;
+    const topPage = currentTopPage();
+    if (recomputeFit) await computeFitScale();
+    await renderAllPages();
+    const el = state.pageEls[topPage];
+    if (el) viewer.scrollTo({ top: el.offsetTop });
+    updateControls();
+    relayoutPending = false;
+  }
+
+  function currentTopPage() {
+    const st = viewer.scrollTop;
+    for (let n = 1; n < state.pageEls.length; n++) {
+      const el = state.pageEls[n];
+      if (!el) continue;
+      if (el.offsetTop + el.offsetHeight > st) return n;
+    }
+    return 1;
+  }
+
+  function setZoom(z) {
+    state.zoom = Math.min(3, Math.max(0.5, Math.round(z * 100) / 100));
+    relayout(false);
+  }
+
+  zoomInBtn.addEventListener('click', () => setZoom(state.zoom + 0.2));
+  zoomOutBtn.addEventListener('click', () => setZoom(state.zoom - 0.2));
+  zoomFitBtn.addEventListener('click', () => setZoom(1));
+
+  // Reajusta al ancho al girar el teléfono o redimensionar la ventana.
+  let resizeTimer = null;
+  window.addEventListener('resize', () => {
+    if (!state.pdfDoc) return;
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => relayout(true), 300);
+  });
 
   playBtn.addEventListener('click', startReading);
   pauseBtn.addEventListener('click', pauseReading);
