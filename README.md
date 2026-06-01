@@ -44,6 +44,33 @@ Luego abre `http://localhost:8000` en tu navegador.
 4. Haz scroll hasta donde quieras empezar y pulsa **▶ Leer**.
 5. Usa **⏸ Pausa** / **▶ Reanudar** o **⏹ Parar** cuando quieras.
 
+## 📱 Instalarla en el celular (GitHub Pages)
+
+La app es una **PWA**: se publica en una URL y se "instala" desde el navegador.
+
+### 1) Publicarla con GitHub Pages (una sola vez)
+
+1. Entra a tu repositorio en GitHub.
+2. Ve a **Settings** (Configuración) → **Pages**.
+3. En **Source** elige **Deploy from a branch**.
+4. En **Branch** selecciona `claude/pdf-text-to-speech-reader-ZGNcj` y carpeta
+   **`/ (root)`**. Pulsa **Save**.
+5. Espera 1–2 minutos. GitHub te mostrará la URL pública, del tipo:
+   **`https://alonsobrena-rgb.github.io/book-reader/`**
+
+### 2) Instalarla en el teléfono
+
+Abre esa URL en el navegador del celular y:
+
+- **Android (Chrome):** menú ⋮ → **Añadir a pantalla de inicio** / **Instalar app**.
+- **iPhone (Safari):** botón **Compartir** ⬆️ → **Añadir a pantalla de inicio**.
+
+Quedará un ícono como el de una app normal, abre a pantalla completa y la
+interfaz se guarda sin conexión (los PDFs los eliges tú cada vez).
+
+> 💡 En el celular las voces dependen del sistema. Android suele traer voces
+> femeninas de Google en español e inglés; iPhone trae las voces de Siri.
+
 ## 🧩 Tecnología
 
 - [PDF.js](https://mozilla.github.io/pdf.js/) para mostrar y extraer el texto.
