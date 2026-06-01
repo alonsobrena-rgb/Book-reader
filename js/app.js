@@ -24,6 +24,8 @@
   const playBtn     = document.getElementById('playBtn');
   const pauseBtn    = document.getElementById('pauseBtn');
   const stopBtn     = document.getElementById('stopBtn');
+  const prevBtn     = document.getElementById('prevBtn');
+  const nextBtn     = document.getElementById('nextBtn');
   const zoomInBtn   = document.getElementById('zoomInBtn');
   const zoomOutBtn  = document.getElementById('zoomOutBtn');
   const zoomFitBtn  = document.getElementById('zoomFitBtn');
@@ -557,6 +559,17 @@
     }
   }
 
+  // Salta al párrafo anterior/siguiente mientras se lee (delta = -1 o +1).
+  function skipParagraph(delta) {
+    if (!state.isReading || state.paragraphs.length === 0) return;
+    const base = state.currentIndex >= 0 ? state.currentIndex : 0;
+    const idx = clamp(base + delta, 0, state.paragraphs.length - 1);
+    state.isPaused = false;
+    synth.cancel();            // corta la locución actual (se ignora "canceled")
+    speakParagraph(idx);       // empieza a leer desde el nuevo párrafo
+    updateControls();
+  }
+
   function stopReading() {
     state.isReading = false;
     state.isPaused = false;
@@ -623,6 +636,10 @@
     pauseBtn.disabled = !state.isReading || state.isPaused;
     stopBtn.disabled = !state.isReading;
     playBtn.textContent = state.isPaused ? '▶ Reanudar' : '▶ Leer';
+
+    // Las flechas funcionan mientras se lee (incluido en pausa).
+    prevBtn.disabled = !state.isReading;
+    nextBtn.disabled = !state.isReading;
 
     const hasPdf = !!state.pdfDoc;
     zoomInBtn.disabled = !hasPdf || state.zoom >= 3;
@@ -712,6 +729,8 @@
   playBtn.addEventListener('click', startReading);
   pauseBtn.addEventListener('click', pauseReading);
   stopBtn.addEventListener('click', stopReading);
+  prevBtn.addEventListener('click', () => skipParagraph(-1));
+  nextBtn.addEventListener('click', () => skipParagraph(1));
 
   langSelect.addEventListener('change', () => {
     populateVoiceSelect();
@@ -747,10 +766,17 @@
 
   // Atajo: barra espaciadora para leer/pausar (si no se escribe en un campo).
   document.addEventListener('keydown', (e) => {
-    if (e.code === 'Space' && e.target === document.body) {
+    if (e.target !== document.body) return;
+    if (e.code === 'Space') {
       e.preventDefault();
       if (state.isReading && !state.isPaused) pauseReading();
       else startReading();
+    } else if (e.code === 'ArrowRight' && state.isReading) {
+      e.preventDefault();
+      skipParagraph(1);
+    } else if (e.code === 'ArrowLeft' && state.isReading) {
+      e.preventDefault();
+      skipParagraph(-1);
     }
   });
 

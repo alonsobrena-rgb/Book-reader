@@ -119,6 +119,7 @@ input[type="range"] {
 .toolbar__group--zoom { gap: 6px; }
 
 .btn--file { background: var(--accent-strong); border-color: var(--accent-strong); }
+.btn--nav { padding: 9px 12px; font-size: 1rem; }
 .btn--play { background: var(--play); border-color: var(--play); color: #08220f; }
 .btn--pause { background: var(--pause); border-color: var(--pause); color: #3a2600; }
 .btn--stop { background: var(--stop); border-color: var(--stop); color: #2a0a06; }

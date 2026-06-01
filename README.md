@@ -13,6 +13,8 @@ no necesita servidor ni instalación.
 - ▶ Botón para **iniciar la lectura desde la parte superior de lo que ves en
   pantalla** (según el scroll actual), no desde el principio del documento.
 - ⏸ **Pausa** y ⏹ **Parar** en cualquier momento.
+- ⏮ ⏭ **Flechas para adelantar o retroceder párrafo** mientras lee (también con
+  las teclas ← / →).
 - 🟦 **Resalta el párrafo que se está leyendo** y desplaza la página para
   seguirlo.
 - 📐 El PDF **se ajusta automáticamente al ancho de la pantalla** (ideal en el
