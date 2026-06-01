@@ -58,7 +58,10 @@
     currentUtterance: null, // referencia fuerte (evita que el GC corte la voz)
     advanceCurrent: null,   // avanza al siguiente fragmento (usado por watchdog)
     currentDocId: null,     // id del PDF abierto (para guardar la posición)
-    textCache: new Map(),   // caché de getTextContent por página (acelera el zoom)
+    pageDims: [],           // dimensiones (escala 1) por página
+    io: null,               // IntersectionObserver para render perezoso
+    currentChunks: null,    // fragmentos del párrafo en curso (para reanudar)
+    currentChunkIndex: 0,   // fragmento actual dentro del párrafo
   };
 
   // Escala efectiva de render = ajuste al ancho * zoom del usuario.
@@ -177,9 +180,9 @@
 
     state.currentDocId = meta.id || null;
     state.zoom = meta.zoom || 1;
-    state.textCache = new Map(); // documento nuevo: caché limpia
     await computeFitScale();
-    await renderAllPages();
+    await buildAllParagraphs(); // extrae texto/geometría una sola vez
+    layoutPages();              // crea las páginas al zoom actual
 
     // Restaura la posición donde se quedó la última vez.
     requestAnimationFrame(() => {
@@ -201,59 +204,55 @@
     state.fitScale = avail / vp.width;
   }
 
-  // (Re)construye todas las páginas y párrafos con la escala actual.
-  async function renderAllPages() {
-    stopReading();
+  // Extrae el texto y construye los párrafos UNA vez por documento.
+  // La geometría se guarda en unidades de escala 1 (independiente del zoom),
+  // así el zoom no necesita recalcular el texto ni interrumpir la lectura.
+  async function buildAllParagraphs() {
+    state.paragraphs = [];
+    state.pageDims = [];
+    for (let n = 1; n <= state.pdfDoc.numPages; n++) {
+      const page = await state.pdfDoc.getPage(n);
+      const vp1 = page.getViewport({ scale: 1 });
+      state.pageDims[n] = { w: vp1.width, h: vp1.height };
+      const textContent = await page.getTextContent();
+      buildParagraphs(textContent, vp1, n);
+    }
+  }
+
+  // Crea/recrea los contenedores de página al zoom actual (operación rápida y
+  // síncrona: no toca los párrafos ni la lectura en curso).
+  function layoutPages() {
+    if (state.io) state.io.disconnect();
     viewer.innerHTML = '';
     state.pageEls = [];
-    state.paragraphs = [];
-    state.currentIndex = -1;
 
-    // Envoltorio que contiene el resaltado y todas las páginas.
     state.pagesWrapper = document.createElement('div');
     state.pagesWrapper.className = 'pages-wrapper';
     viewer.appendChild(state.pagesWrapper);
 
-    // Elemento de resaltado único.
     state.highlightEl = document.createElement('div');
     state.highlightEl.className = 'reading-highlight';
     state.pagesWrapper.appendChild(state.highlightEl);
 
-    // Crea los contenedores de todas las páginas (con su tamaño real) y
-    // extrae el texto/párrafos. El canvas se renderiza de forma perezosa.
+    const s = currentScale();
     for (let n = 1; n <= state.pdfDoc.numPages; n++) {
-      await preparePage(n);
+      const dims = state.pageDims[n];
+      const pageEl = document.createElement('div');
+      pageEl.className = 'page';
+      pageEl.style.width = `${dims.w * s}px`;
+      pageEl.style.height = `${dims.h * s}px`;
+      pageEl.dataset.pageNum = String(n);
+      pageEl.dataset.rendered = 'false';
+
+      const placeholder = document.createElement('div');
+      placeholder.className = 'page__placeholder';
+      placeholder.textContent = `Página ${n}`;
+      pageEl.appendChild(placeholder);
+
+      state.pagesWrapper.appendChild(pageEl);
+      state.pageEls[n] = pageEl;
     }
     setupLazyRendering();
-  }
-
-  // Crea el contenedor de la página, fija su tamaño y construye los párrafos.
-  async function preparePage(pageNum) {
-    const page = await state.pdfDoc.getPage(pageNum);
-    const viewport = page.getViewport({ scale: currentScale() });
-
-    const pageEl = document.createElement('div');
-    pageEl.className = 'page';
-    pageEl.style.width = `${viewport.width}px`;
-    pageEl.style.height = `${viewport.height}px`;
-    pageEl.dataset.pageNum = String(pageNum);
-    pageEl.dataset.rendered = 'false';
-
-    const placeholder = document.createElement('div');
-    placeholder.className = 'page__placeholder';
-    placeholder.textContent = `Página ${pageNum}`;
-    pageEl.appendChild(placeholder);
-
-    state.pagesWrapper.appendChild(pageEl);
-    state.pageEls[pageNum] = pageEl;
-
-    // Extrae texto (cacheado) y construye los párrafos con su geometría.
-    let textContent = state.textCache.get(pageNum);
-    if (!textContent) {
-      textContent = await page.getTextContent();
-      state.textCache.set(pageNum, textContent);
-    }
-    buildParagraphs(textContent, viewport, pageNum, pageEl);
   }
 
   // Renderiza el canvas de una página solo cuando es visible.
@@ -278,7 +277,7 @@
   }
 
   function setupLazyRendering() {
-    const io = new IntersectionObserver(
+    state.io = new IntersectionObserver(
       (entries) => {
         entries.forEach((entry) => {
           if (entry.isIntersecting) renderPageCanvas(entry.target);
@@ -286,14 +285,14 @@
       },
       { root: viewer, rootMargin: '600px 0px' }
     );
-    state.pageEls.forEach((el) => el && io.observe(el));
+    state.pageEls.forEach((el) => el && state.io.observe(el));
   }
 
   /* ====================================================================
    * 3. AGRUPACIÓN DE TEXTO EN PÁRRAFOS
    * ==================================================================== */
 
-  function buildParagraphs(textContent, viewport, pageNum, pageEl) {
+  function buildParagraphs(textContent, viewport, pageNum) {
     // Convierte cada item en una caja con posición en coordenadas de viewport.
     const boxes = [];
     for (const item of textContent.items) {
@@ -382,10 +381,10 @@
       const text = p.lines.join(' ').replace(/\s+/g, ' ').trim();
       if (text.length < 2) continue;
       const pad = 4;
+      // box en unidades de escala 1; al posicionar se multiplica por la escala.
       state.paragraphs.push({
         text,
         pageNum,
-        pageEl,
         box: {
           left: p.left - pad,
           top: p.top - pad,
@@ -410,12 +409,15 @@
   function highlightParagraph(index) {
     const p = state.paragraphs[index];
     if (!p) return;
+    const el = state.pageEls[p.pageNum];
+    if (!el) return;
+    const s = currentScale();
     const hl = state.highlightEl;
-    const x = p.pageEl.offsetLeft + p.box.left;
-    const y = p.pageEl.offsetTop + p.box.top;
+    const x = el.offsetLeft + p.box.left * s;
+    const y = el.offsetTop + p.box.top * s;
     hl.style.transform = `translate(${x}px, ${y}px)`;
-    hl.style.width = `${p.box.width}px`;
-    hl.style.height = `${p.box.height}px`;
+    hl.style.width = `${p.box.width * s}px`;
+    hl.style.height = `${p.box.height * s}px`;
     hl.classList.add('is-visible');
   }
 
@@ -429,10 +431,16 @@
     return wrapTop + pageEl.offsetTop;
   }
 
+  // Posición absoluta (en el scroll) del borde superior de un párrafo.
+  function paragraphTop(p) {
+    const el = state.pageEls[p.pageNum];
+    return el ? pageTop(el) + p.box.top * currentScale() : 0;
+  }
+
   function scrollParagraphIntoView(index) {
     const p = state.paragraphs[index];
-    if (!p) return;
-    const targetTop = pageTop(p.pageEl) + p.box.top;
+    if (!p || !state.pageEls[p.pageNum]) return;
+    const targetTop = paragraphTop(p);
     const margin = 90;
     const viewTop = viewer.scrollTop;
     const viewBottom = viewTop + viewer.clientHeight;
@@ -445,9 +453,12 @@
   // Encuentra el primer párrafo visible en la parte superior del scroll.
   function findParagraphAtTop() {
     const threshold = viewer.scrollTop + 4;
+    const s = currentScale();
     for (let i = 0; i < state.paragraphs.length; i++) {
       const p = state.paragraphs[i];
-      const bottom = pageTop(p.pageEl) + p.box.top + p.box.height;
+      const el = state.pageEls[p.pageNum];
+      if (!el) continue;
+      const bottom = pageTop(el) + (p.box.top + p.box.height) * s;
       if (bottom > threshold) return i;
     }
     return state.paragraphs.length > 0 ? 0 : -1;
@@ -479,13 +490,7 @@
 
   function startReading() {
     if (!state.pdfDoc || state.paragraphs.length === 0) return;
-
-    if (state.isPaused) { // Reanudar
-      synth.resume();
-      state.isPaused = false;
-      updateControls();
-      return;
-    }
+    if (state.isPaused) { resumeReading(); return; } // reanudar
     if (state.isReading) return;
 
     const startIndex = findParagraphAtTop();
@@ -499,6 +504,24 @@
     speakParagraph(startIndex);
   }
 
+  // Reanuda manualmente desde el fragmento guardado (pause()/resume() del
+  // navegador no es fiable, sobre todo en móvil).
+  function resumeReading() {
+    const idx = state.currentIndex >= 0 ? state.currentIndex : findParagraphAtTop();
+    if (idx < 0) { stopReading(); return; }
+    state.isPaused = false;
+    state.isReading = true;
+    startKeepAlive();
+    startWatchdog();
+    updateControls();
+    const chunks = (state.currentChunks && state.currentChunks.length)
+      ? state.currentChunks
+      : chunkText(state.paragraphs[idx].text);
+    highlightParagraph(idx);
+    scrollParagraphIntoView(idx);
+    speakChunks(chunks, state.currentChunkIndex || 0, idx);
+  }
+
   function speakParagraph(index) {
     if (!state.isReading || index >= state.paragraphs.length) {
       stopReading();
@@ -509,16 +532,21 @@
     scrollParagraphIntoView(index);
 
     const chunks = chunkText(state.paragraphs[index].text);
+    state.currentChunks = chunks;
+    state.currentChunkIndex = 0;
     speakChunks(chunks, 0, index);
   }
 
   function speakChunks(chunks, ci, pIndex) {
-    if (!state.isReading) return;
+    if (!state.isReading || state.isPaused) return;
 
     if (ci >= chunks.length) {
       speakParagraph(pIndex + 1); // Siguiente párrafo
       return;
     }
+
+    state.currentChunks = chunks;
+    state.currentChunkIndex = ci; // recuerda el punto para reanudar
 
     const utter = new SpeechSynthesisUtterance(chunks[ci]);
     const voice = getSelectedVoice();
@@ -553,8 +581,10 @@
 
   function pauseReading() {
     if (state.isReading && !state.isPaused) {
-      synth.pause();
       state.isPaused = true;
+      // Corta la locución; al reanudar se vuelve a leer desde el fragmento
+      // guardado (más fiable que synth.pause()/resume(), roto en móvil).
+      if (synth.speaking || synth.pending) synth.cancel();
       updateControls();
     }
   }
@@ -576,6 +606,8 @@
     state.currentIndex = -1;
     state.advanceCurrent = null;
     state.currentUtterance = null;
+    state.currentChunks = null;
+    state.currentChunkIndex = 0;
     stopKeepAlive();
     stopWatchdog();
     if (synth.speaking || synth.pending) synth.cancel();
@@ -647,17 +679,29 @@
     zoomFitBtn.disabled = !hasPdf;
   }
 
-  // Vuelve a maquetar las páginas (zoom o cambio de tamaño de pantalla),
-  // conservando aproximadamente la página que estaba arriba.
+  // Vuelve a maquetar las páginas (zoom o cambio de tamaño). NO interrumpe la
+  // lectura: solo recalcula tamaños y reposiciona el resaltado.
   let relayoutPending = false;
   async function relayout(recomputeFit) {
     if (!state.pdfDoc || relayoutPending) return;
     relayoutPending = true;
+
+    const reading = state.isReading;
+    const keepIndex = state.currentIndex;
     const topPage = currentTopPage();
+
     if (recomputeFit) await computeFitScale();
-    await renderAllPages();
-    const el = state.pageEls[topPage];
-    if (el) viewer.scrollTo({ top: pageTop(el) });
+    layoutPages(); // síncrono: no toca párrafos ni lectura
+
+    // Reposiciona la vista: si está leyendo, sigue el párrafo actual.
+    if (reading && keepIndex >= 0 && state.paragraphs[keepIndex]) {
+      highlightParagraph(keepIndex);
+      const top = paragraphTop(state.paragraphs[keepIndex]);
+      viewer.scrollTo({ top: Math.max(0, top - 90) });
+    } else {
+      const el = state.pageEls[topPage];
+      if (el) viewer.scrollTo({ top: pageTop(el) });
+    }
     updateControls();
     relayoutPending = false;
   }
