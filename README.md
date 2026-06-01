@@ -23,6 +23,10 @@ no necesita servidor ni instalación.
   del navegador).
 - 💾 **Tus PDFs se guardan en el dispositivo** (biblioteca 📚) y al reabrirlos
   **vuelves justo a la página donde te quedaste**.
+- 🔍 **Buscador de palabras**: lista los párrafos donde aparece la palabra, con
+  la coincidencia resaltada; al tocar un resultado salta a ese punto del PDF.
+- ☰ **Menú desplegable** que oculta los controles para dejar más espacio al PDF,
+  con un **botón flotante** para leer/pausar al instante.
 - ⌨️ Atajo: barra espaciadora para leer / pausar.
 
 ## 🚀 Cómo usar

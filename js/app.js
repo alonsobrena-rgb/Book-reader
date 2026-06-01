@@ -29,6 +29,15 @@
   const zoomInBtn   = document.getElementById('zoomInBtn');
   const zoomOutBtn  = document.getElementById('zoomOutBtn');
   const zoomFitBtn  = document.getElementById('zoomFitBtn');
+  const menuBtn     = document.getElementById('menuBtn');
+  const menuPanel   = document.getElementById('menuPanel');
+  const searchToggle = document.getElementById('searchToggle');
+  const searchPanel = document.getElementById('searchPanel');
+  const searchInput = document.getElementById('searchInput');
+  const searchCount = document.getElementById('searchCount');
+  const searchResults = document.getElementById('searchResults');
+  const searchClose = document.getElementById('searchClose');
+  const fab         = document.getElementById('fab');
   const libraryBtn  = document.getElementById('libraryBtn');
   const libOverlay  = document.getElementById('libOverlay');
   const libCloseBtn = document.getElementById('libCloseBtn');
@@ -192,6 +201,8 @@
 
     if (meta.id) updateMeta(meta.id, { numPages: state.pdfDoc.numPages });
     updateControls();
+    closeMenu();
+    if (searchInput.value.trim()) runSearch(); // refresca resultados si había búsqueda
     hideToast();
     showToast(`PDF cargado: ${state.pdfDoc.numPages} páginas`, 1500);
   }
@@ -490,6 +501,7 @@
 
   function startReading() {
     if (!state.pdfDoc || state.paragraphs.length === 0) return;
+    closeMenu(); // deja ver el PDF mientras lee
     if (state.isPaused) { resumeReading(); return; } // reanudar
     if (state.isReading) return;
 
@@ -677,6 +689,12 @@
     zoomInBtn.disabled = !hasPdf || state.zoom >= 3;
     zoomOutBtn.disabled = !hasPdf || state.zoom <= 0.5;
     zoomFitBtn.disabled = !hasPdf;
+
+    // Botón flotante de lectura.
+    const playing = state.isReading && !state.isPaused;
+    fab.hidden = !hasDoc;
+    fab.textContent = playing ? '⏸' : '▶';
+    fab.classList.toggle('is-playing', playing);
   }
 
   // Vuelve a maquetar las páginas (zoom o cambio de tamaño). NO interrumpe la
@@ -969,7 +987,151 @@
   });
 
   /* ====================================================================
-   * 8. UTILIDADES UI
+   * 8. MENÚ DESPLEGABLE, BUSCADOR Y BOTÓN FLOTANTE
+   * ==================================================================== */
+
+  function closeMenu() {
+    menuPanel.classList.remove('is-open');
+    menuBtn.classList.remove('is-active');
+  }
+  function closeSearch() {
+    searchPanel.classList.remove('is-open');
+    searchToggle.classList.remove('is-active');
+  }
+
+  menuBtn.addEventListener('click', () => {
+    const open = menuPanel.classList.toggle('is-open');
+    menuBtn.classList.toggle('is-active', open);
+    if (open) closeSearch();
+  });
+
+  searchToggle.addEventListener('click', () => {
+    const open = searchPanel.classList.toggle('is-open');
+    searchToggle.classList.toggle('is-active', open);
+    if (open) { closeMenu(); setTimeout(() => searchInput.focus(), 50); }
+  });
+  searchClose.addEventListener('click', closeSearch);
+
+  // Botón flotante: alterna leer / pausar.
+  fab.addEventListener('click', () => {
+    if (state.isReading && !state.isPaused) pauseReading();
+    else startReading();
+  });
+
+  // ---- Buscador de palabras ----
+  // Pliega acentos manteniendo la longitud 1:1 con el texto original, para que
+  // los índices de coincidencia sigan siendo válidos al resaltar.
+  function fold(ch) {
+    const n = ch.normalize('NFD');
+    return (n[0] || ch).toLowerCase();
+  }
+  function foldText(s) {
+    let out = '';
+    for (const ch of s) out += fold(ch);
+    return out;
+  }
+  function escapeHtml(s) {
+    return s.replace(/[&<>"']/g, (c) =>
+      ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  }
+
+  let searchTimer = null;
+  searchInput.addEventListener('input', () => {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(runSearch, 180);
+  });
+
+  function runSearch() {
+    const raw = searchInput.value.trim();
+    searchResults.innerHTML = '';
+
+    if (!state.pdfDoc || state.paragraphs.length === 0) {
+      searchCount.textContent = '';
+      searchResults.innerHTML = '<div class="search-empty">Abre un PDF para buscar.</div>';
+      return;
+    }
+    if (raw.length < 2) {
+      searchCount.textContent = '';
+      searchResults.innerHTML = '<div class="search-empty">Escribe al menos 2 letras.</div>';
+      return;
+    }
+
+    const q = foldText(raw);
+    const qlen = raw.length;
+    const results = [];
+    let total = 0;
+
+    for (let i = 0; i < state.paragraphs.length; i++) {
+      const text = state.paragraphs[i].text;
+      const folded = foldText(text);
+      const positions = [];
+      let idx = folded.indexOf(q);
+      while (idx !== -1) {
+        positions.push(idx);
+        idx = folded.indexOf(q, idx + q.length);
+      }
+      if (positions.length) {
+        results.push({ pIndex: i, positions, text, pageNum: state.paragraphs[i].pageNum });
+        total += positions.length;
+      }
+    }
+
+    searchCount.textContent = total
+      ? `${total} resultado${total === 1 ? '' : 's'}`
+      : 'Sin resultados';
+
+    if (!results.length) {
+      searchResults.innerHTML = '<div class="search-empty">No se encontró esa palabra.</div>';
+      return;
+    }
+
+    const frag = document.createDocumentFragment();
+    for (const r of results) {
+      const el = document.createElement('div');
+      el.className = 'search-result';
+      el.innerHTML =
+        `<span class="search-result__page">Página ${r.pageNum}` +
+        (r.positions.length > 1 ? ` · ${r.positions.length} veces` : '') +
+        `</span>` + buildSnippet(r.text, r.positions, qlen);
+      el.addEventListener('click', () => {
+        goToParagraph(r.pIndex);
+        if (window.innerWidth < 700) closeSearch(); // en móvil deja ver el PDF
+      });
+      frag.appendChild(el);
+    }
+    searchResults.appendChild(frag);
+  }
+
+  // Construye un fragmento del párrafo con todas las coincidencias resaltadas.
+  function buildSnippet(text, positions, qlen) {
+    const first = positions[0];
+    const start = Math.max(0, first - 50);
+    const end = Math.min(text.length, first + qlen + 160);
+    let html = start > 0 ? '…' : '';
+    let cursor = start;
+    for (const pos of positions) {
+      if (pos < start || pos >= end) continue;
+      html += escapeHtml(text.slice(cursor, pos));
+      html += '<mark>' + escapeHtml(text.slice(pos, pos + qlen)) + '</mark>';
+      cursor = pos + qlen;
+    }
+    html += escapeHtml(text.slice(cursor, end));
+    if (end < text.length) html += '…';
+    return html;
+  }
+
+  // Lleva la vista a un párrafo y lo resalta (desde el buscador).
+  function goToParagraph(i) {
+    const p = state.paragraphs[i];
+    if (!p || !state.pageEls[p.pageNum]) return;
+    state.currentIndex = i;
+    highlightParagraph(i);
+    const top = paragraphTop(p);
+    viewer.scrollTo({ top: Math.max(0, top - 90), behavior: 'smooth' });
+  }
+
+  /* ====================================================================
+   * 9. UTILIDADES UI
    * ==================================================================== */
 
   let toastEl = null;

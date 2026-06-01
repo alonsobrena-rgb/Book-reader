@@ -18,13 +18,16 @@
   <link rel="stylesheet" href="css/styles.css" />
 </head>
 <body>
-  <header class="toolbar">
-    <div class="toolbar__group toolbar__brand">
-      <span class="brand__icon">🔊</span>
-      <span class="brand__name">Lector de PDF</span>
-    </div>
+  <!-- Barra superior slim: abre el menú y el buscador -->
+  <header class="topbar">
+    <button id="menuBtn" class="iconbtn" title="Menú" aria-label="Abrir menú">☰</button>
+    <span class="topbar__title">🔊 Lector de PDF</span>
+    <button id="searchToggle" class="iconbtn" title="Buscar" aria-label="Buscar">🔍</button>
+  </header>
 
-    <div class="toolbar__group">
+  <!-- Menú desplegable (oculto por defecto) con todos los controles -->
+  <div id="menuPanel" class="panel menu-panel">
+    <div class="menu-row">
       <label class="btn btn--file">
         📂 Abrir PDF
         <input type="file" id="fileInput" accept="application/pdf" hidden />
@@ -32,7 +35,7 @@
       <button id="libraryBtn" class="btn" title="Mis PDFs guardados">📚 Biblioteca</button>
     </div>
 
-    <div class="toolbar__group">
+    <div class="menu-row">
       <label class="field">
         <span class="field__label">Idioma</span>
         <select id="langSelect">
@@ -47,39 +50,50 @@
       </label>
     </div>
 
-    <div class="toolbar__group">
+    <div class="menu-row">
       <label class="field field--slider">
         <span class="field__label">Velocidad: <strong id="rateValue">1.0x</strong></span>
         <input type="range" id="rateSlider" min="0.5" max="2.5" step="0.1" value="1" />
       </label>
     </div>
 
-    <div class="toolbar__group toolbar__group--zoom">
+    <div class="menu-row">
       <span class="field__label">Zoom</span>
       <button id="zoomOutBtn" class="btn btn--icon" title="Alejar" disabled>A−</button>
       <button id="zoomFitBtn" class="btn btn--icon" title="Ajustar al ancho" disabled>Ajustar</button>
       <button id="zoomInBtn" class="btn btn--icon" title="Acercar" disabled>A+</button>
     </div>
 
-    <div class="toolbar__group toolbar__group--actions">
+    <div class="menu-row menu-row--actions">
       <button id="prevBtn" class="btn btn--nav" title="Párrafo anterior" disabled>⏮</button>
       <button id="playBtn" class="btn btn--play" disabled>▶ Leer</button>
       <button id="pauseBtn" class="btn btn--pause" disabled>⏸ Pausa</button>
       <button id="stopBtn" class="btn btn--stop" disabled>⏹ Parar</button>
       <button id="nextBtn" class="btn btn--nav" title="Párrafo siguiente" disabled>⏭</button>
     </div>
-  </header>
+  </div>
+
+  <!-- Panel de búsqueda (oculto por defecto) -->
+  <div id="searchPanel" class="panel search-panel">
+    <div class="search-bar">
+      <input id="searchInput" type="search" placeholder="Buscar palabra en el PDF…"
+             autocomplete="off" autocorrect="off" spellcheck="false" />
+      <span id="searchCount" class="search-count"></span>
+      <button id="searchClose" class="iconbtn" title="Cerrar búsqueda">✕</button>
+    </div>
+    <div id="searchResults" class="search-results"></div>
+  </div>
 
   <main id="viewer" class="viewer">
     <div id="emptyState" class="empty-state">
       <div class="empty-state__icon">📖</div>
       <h1>Lector de PDF en voz alta</h1>
-      <p>Abre un PDF para empezar. Pulsa <strong>Leer</strong> y la lectura
-         comenzará desde la parte superior de lo que estés viendo en pantalla.</p>
+      <p>Toca <strong>☰</strong> arriba para abrir el menú y <strong>Abrir PDF</strong>.
+         La lectura empieza desde la parte superior de lo que veas en pantalla.</p>
       <ul>
-        <li>Voz femenina en español o inglés</li>
-        <li>Velocidad ajustable hasta 2.5x</li>
+        <li>Voz femenina en español o inglés, hasta 2.5x</li>
         <li>Se resalta el párrafo que se está leyendo</li>
+        <li>🔍 Buscador de palabras dentro del PDF</li>
         <li>Pellizca con dos dedos para acercar/alejar</li>
         <li>Tus PDFs se guardan y recuerdan dónde te quedaste</li>
       </ul>
@@ -87,6 +101,9 @@
       <div id="libraryList" class="library"></div>
     </div>
   </main>
+
+  <!-- Botón flotante de lectura (play/pausa rápido) -->
+  <button id="fab" class="fab" title="Leer / Pausar" hidden>▶</button>
 
   <!-- Overlay de biblioteca (se abre con el botón 📚) -->
   <div id="libOverlay" class="lib-overlay">
