@@ -131,7 +131,16 @@ input[type="range"] {
   overflow-x: auto;
   padding: 24px 0 80px;
   -webkit-overflow-scrolling: touch;
+  /* Desactiva el pinch-zoom nativo del navegador: lo gestionamos nosotros. */
+  touch-action: pan-x pan-y;
   scroll-behavior: smooth;
+}
+
+/* Envoltorio que escalamos durante el pinch-zoom (vista previa fluida). */
+.pages-wrapper {
+  position: relative;
+  width: 100%;
+  transform-origin: center top;
 }
 
 .page {
@@ -188,6 +197,73 @@ input[type="range"] {
   text-align: left;
   margin-top: 16px;
   line-height: 1.7;
+}
+
+/* ---------- Biblioteca de PDFs guardados ---------- */
+.library {
+  max-width: 640px;
+  margin: 28px auto 0;
+  padding: 0 18px;
+}
+.library__title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text);
+  font-size: 1.05rem;
+  margin: 0 0 12px;
+}
+.library__empty { color: var(--text-dim); font-size: 0.9rem; }
+
+.lib-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 14px;
+  margin-bottom: 10px;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.lib-item:hover { border-color: var(--accent); }
+.lib-item__icon { font-size: 1.5rem; }
+.lib-item__info { flex: 1; min-width: 0; }
+.lib-item__name {
+  color: var(--text);
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.lib-item__meta { color: var(--text-dim); font-size: 0.78rem; margin-top: 2px; }
+.lib-item__del {
+  flex-shrink: 0;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  border-radius: 8px;
+  padding: 6px 9px;
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+.lib-item__del:hover { color: var(--stop); border-color: var(--stop); }
+
+/* Overlay de biblioteca (botón 📚) */
+.lib-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(10, 11, 14, 0.78);
+  z-index: 40;
+  display: none;
+  overflow-y: auto;
+  padding: 24px 0 60px;
+}
+.lib-overlay.is-open { display: block; }
+.lib-overlay__close {
+  display: block;
+  margin: 0 auto 8px;
 }
 
 /* ---------- Toast / loader ---------- */

@@ -27,10 +27,16 @@
   const zoomInBtn   = document.getElementById('zoomInBtn');
   const zoomOutBtn  = document.getElementById('zoomOutBtn');
   const zoomFitBtn  = document.getElementById('zoomFitBtn');
+  const libraryBtn  = document.getElementById('libraryBtn');
+  const libOverlay  = document.getElementById('libOverlay');
+  const libCloseBtn = document.getElementById('libCloseBtn');
+  const libraryList = document.getElementById('libraryList');
+  const libOverlayList = document.getElementById('libOverlayList');
   const viewer      = document.getElementById('viewer');
   const emptyState  = document.getElementById('emptyState');
 
   const synth = window.speechSynthesis;
+  const IS_MOBILE = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
 
   // ---- Estado global ----
   const state = {
@@ -38,6 +44,7 @@
     fitScale: 1,        // escala para ajustar la página al ancho del visor
     zoom: 1,            // multiplicador de zoom del usuario
     pageEls: [],        // contenedores .page por página
+    pagesWrapper: null, // envoltorio de páginas (para pinch-zoom)
     paragraphs: [],     // lista plana de párrafos en orden de lectura
     highlightEl: null,  // único elemento de resaltado reutilizable
     currentIndex: -1,   // párrafo en lectura
@@ -45,6 +52,11 @@
     isPaused: false,
     voices: [],
     keepAliveTimer: null,
+    watchdogTimer: null,
+    currentUtterance: null, // referencia fuerte (evita que el GC corte la voz)
+    advanceCurrent: null,   // avanza al siguiente fragmento (usado por watchdog)
+    currentDocId: null,     // id del PDF abierto (para guardar la posición)
+    textCache: new Map(),   // caché de getTextContent por página (acelera el zoom)
   };
 
   // Escala efectiva de render = ajuste al ancho * zoom del usuario.
@@ -125,14 +137,34 @@
 
   fileInput.addEventListener('change', (e) => {
     const file = e.target.files[0];
-    if (file) loadPdf(file);
+    if (file) handleFile(file);
+    fileInput.value = ''; // permite reabrir el mismo archivo
   });
 
-  async function loadPdf(file) {
-    stopReading();
-    showToast('Cargando PDF…');
+  // Abre un archivo elegido por el usuario: lo guarda en la biblioteca y lo abre.
+  async function handleFile(file) {
+    const id = `${file.name}__${file.size}`;
+    const meta = {
+      id, name: file.name, size: file.size, blob: file,
+      zoom: 1, scrollFraction: 0, savedAt: Date.now(),
+    };
+    // Si ya estaba guardado, conserva su posición y zoom previos.
+    const existing = await dbGet(id).catch(() => null);
+    if (existing) {
+      meta.zoom = existing.zoom || 1;
+      meta.scrollFraction = existing.scrollFraction || 0;
+    }
+    await dbPut(meta).catch((e) => console.warn('No se pudo guardar el PDF:', e));
 
     const buf = await file.arrayBuffer();
+    await openDocument(buf, meta);
+    refreshLibrary();
+  }
+
+  // Carga el documento en el visor y restaura zoom + posición de lectura.
+  async function openDocument(buf, meta) {
+    stopReading();
+    showToast('Cargando PDF…');
     try {
       state.pdfDoc = await pdfjsLib.getDocument({ data: buf }).promise;
     } catch (err) {
@@ -141,13 +173,22 @@
       return;
     }
 
-    state.zoom = 1;
+    state.currentDocId = meta.id || null;
+    state.zoom = meta.zoom || 1;
+    state.textCache = new Map(); // documento nuevo: caché limpia
     await computeFitScale();
     await renderAllPages();
 
+    // Restaura la posición donde se quedó la última vez.
+    requestAnimationFrame(() => {
+      const max = viewer.scrollHeight - viewer.clientHeight;
+      viewer.scrollTop = Math.max(0, (meta.scrollFraction || 0) * max);
+    });
+
+    if (meta.id) updateMeta(meta.id, { numPages: state.pdfDoc.numPages });
     updateControls();
     hideToast();
-    showToast(`PDF cargado: ${state.pdfDoc.numPages} páginas`, 2000);
+    showToast(`PDF cargado: ${state.pdfDoc.numPages} páginas`, 1500);
   }
 
   // Calcula la escala para que la página ocupe el ancho disponible del visor.
@@ -166,10 +207,15 @@
     state.paragraphs = [];
     state.currentIndex = -1;
 
+    // Envoltorio que contiene el resaltado y todas las páginas.
+    state.pagesWrapper = document.createElement('div');
+    state.pagesWrapper.className = 'pages-wrapper';
+    viewer.appendChild(state.pagesWrapper);
+
     // Elemento de resaltado único.
     state.highlightEl = document.createElement('div');
     state.highlightEl.className = 'reading-highlight';
-    viewer.appendChild(state.highlightEl);
+    state.pagesWrapper.appendChild(state.highlightEl);
 
     // Crea los contenedores de todas las páginas (con su tamaño real) y
     // extrae el texto/párrafos. El canvas se renderiza de forma perezosa.
@@ -196,11 +242,15 @@
     placeholder.textContent = `Página ${pageNum}`;
     pageEl.appendChild(placeholder);
 
-    viewer.appendChild(pageEl);
+    state.pagesWrapper.appendChild(pageEl);
     state.pageEls[pageNum] = pageEl;
 
-    // Extrae texto y construye los párrafos con su geometría.
-    const textContent = await page.getTextContent();
+    // Extrae texto (cacheado) y construye los párrafos con su geometría.
+    let textContent = state.textCache.get(pageNum);
+    if (!textContent) {
+      textContent = await page.getTextContent();
+      state.textCache.set(pageNum, textContent);
+    }
     buildParagraphs(textContent, viewport, pageNum, pageEl);
   }
 
@@ -371,10 +421,16 @@
     state.highlightEl?.classList.remove('is-visible');
   }
 
+  // Posición vertical de la página dentro del scroll del visor.
+  function pageTop(pageEl) {
+    const wrapTop = state.pagesWrapper ? state.pagesWrapper.offsetTop : 0;
+    return wrapTop + pageEl.offsetTop;
+  }
+
   function scrollParagraphIntoView(index) {
     const p = state.paragraphs[index];
     if (!p) return;
-    const targetTop = p.pageEl.offsetTop + p.box.top;
+    const targetTop = pageTop(p.pageEl) + p.box.top;
     const margin = 90;
     const viewTop = viewer.scrollTop;
     const viewBottom = viewTop + viewer.clientHeight;
@@ -389,7 +445,7 @@
     const threshold = viewer.scrollTop + 4;
     for (let i = 0; i < state.paragraphs.length; i++) {
       const p = state.paragraphs[i];
-      const bottom = p.pageEl.offsetTop + p.box.top + p.box.height;
+      const bottom = pageTop(p.pageEl) + p.box.top + p.box.height;
       if (bottom > threshold) return i;
     }
     return state.paragraphs.length > 0 ? 0 : -1;
@@ -401,7 +457,7 @@
 
   // Divide un párrafo largo en fragmentos cortos (por frases) para evitar
   // el corte de utterances largas en algunos navegadores.
-  function chunkText(text, maxLen = 220) {
+  function chunkText(text, maxLen = 140) {
     const sentences = text.match(/[^.!?¡¿…]+[.!?…]*/g) || [text];
     const chunks = [];
     let buf = '';
@@ -436,6 +492,7 @@
     state.isReading = true;
     state.isPaused = false;
     startKeepAlive();
+    startWatchdog();
     updateControls();
     speakParagraph(startIndex);
   }
@@ -468,13 +525,25 @@
     utter.rate = parseFloat(rateSlider.value);
     utter.pitch = 1;
 
-    utter.onend = () => {
+    // Mantener una referencia fuerte evita que el recolector de basura del
+    // navegador corte la locución a las pocas palabras (bug conocido).
+    state.currentUtterance = utter;
+
+    // Avanza al siguiente fragmento una sola vez (onend, onerror o watchdog).
+    let advanced = false;
+    const advance = () => {
+      if (advanced) return;
+      advanced = true;
+      state.advanceCurrent = null;
       if (state.isReading) speakChunks(chunks, ci + 1, pIndex);
     };
+    state.advanceCurrent = advance;
+
+    utter.onend = advance;
     utter.onerror = (e) => {
       if (e.error === 'interrupted' || e.error === 'canceled') return;
       console.warn('Error de síntesis:', e.error);
-      if (state.isReading) speakChunks(chunks, ci + 1, pIndex);
+      advance();
     };
 
     synth.speak(utter);
@@ -492,16 +561,21 @@
     state.isReading = false;
     state.isPaused = false;
     state.currentIndex = -1;
+    state.advanceCurrent = null;
+    state.currentUtterance = null;
     stopKeepAlive();
+    stopWatchdog();
     if (synth.speaking || synth.pending) synth.cancel();
     clearHighlight();
     updateControls();
   }
 
-  // Algunos navegadores (Chrome) detienen la síntesis tras ~15s en pausas
-  // internas; este "keep alive" la mantiene activa.
+  // En escritorio, Chrome detiene la síntesis tras ~15s; este "keep alive"
+  // la mantiene activa. En móvil pause()/resume() es inestable, así que se
+  // omite (los fragmentos cortos + el watchdog cubren ese caso).
   function startKeepAlive() {
     stopKeepAlive();
+    if (IS_MOBILE) return;
     state.keepAliveTimer = setInterval(() => {
       if (state.isReading && !state.isPaused && synth.speaking) {
         synth.pause();
@@ -513,6 +587,29 @@
     if (state.keepAliveTimer) {
       clearInterval(state.keepAliveTimer);
       state.keepAliveTimer = null;
+    }
+  }
+
+  // Watchdog: si la síntesis se queda en silencio mientras "leemos" (por un
+  // corte del navegador o un onend que no se dispara), reanuda el avance.
+  function startWatchdog() {
+    stopWatchdog();
+    let idleTicks = 0;
+    state.watchdogTimer = setInterval(() => {
+      if (!state.isReading || state.isPaused) { idleTicks = 0; return; }
+      if (synth.speaking || synth.pending) { idleTicks = 0; return; }
+      idleTicks++;
+      // ~1.4s de silencio inesperado => reactiva el avance.
+      if (idleTicks >= 2) {
+        idleTicks = 0;
+        if (state.advanceCurrent) state.advanceCurrent();
+      }
+    }, 700);
+  }
+  function stopWatchdog() {
+    if (state.watchdogTimer) {
+      clearInterval(state.watchdogTimer);
+      state.watchdogTimer = null;
     }
   }
 
@@ -543,7 +640,7 @@
     if (recomputeFit) await computeFitScale();
     await renderAllPages();
     const el = state.pageEls[topPage];
-    if (el) viewer.scrollTo({ top: el.offsetTop });
+    if (el) viewer.scrollTo({ top: pageTop(el) });
     updateControls();
     relayoutPending = false;
   }
@@ -553,19 +650,56 @@
     for (let n = 1; n < state.pageEls.length; n++) {
       const el = state.pageEls[n];
       if (!el) continue;
-      if (el.offsetTop + el.offsetHeight > st) return n;
+      if (pageTop(el) + el.offsetHeight > st) return n;
     }
     return 1;
   }
 
-  function setZoom(z) {
-    state.zoom = Math.min(3, Math.max(0.5, Math.round(z * 100) / 100));
-    relayout(false);
+  const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+
+  async function setZoom(z) {
+    state.zoom = clamp(Math.round(z * 100) / 100, 0.5, 3);
+    await relayout(false);
+    savePosition();
   }
 
   zoomInBtn.addEventListener('click', () => setZoom(state.zoom + 0.2));
   zoomOutBtn.addEventListener('click', () => setZoom(state.zoom - 0.2));
   zoomFitBtn.addEventListener('click', () => setZoom(1));
+
+  /* ---- Pinch-zoom con dos dedos (sin usar el zoom del navegador) ---- */
+  function touchDist(t) {
+    return Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+  }
+  let pinch = null;
+
+  viewer.addEventListener('touchstart', (e) => {
+    if (e.touches.length === 2 && state.pdfDoc && state.pagesWrapper) {
+      pinch = { startDist: touchDist(e.touches), startZoom: state.zoom, ratio: 1 };
+      state.pagesWrapper.style.transition = 'none';
+      e.preventDefault();
+    }
+  }, { passive: false });
+
+  viewer.addEventListener('touchmove', (e) => {
+    if (!pinch || e.touches.length !== 2) return;
+    e.preventDefault();
+    const target = clamp(pinch.startZoom * (touchDist(e.touches) / pinch.startDist), 0.5, 3);
+    pinch.ratio = target / pinch.startZoom;
+    // Vista previa fluida con CSS; al soltar se re-renderiza nítido.
+    state.pagesWrapper.style.transform = `scale(${pinch.ratio})`;
+  }, { passive: false });
+
+  function endPinch() {
+    if (!pinch) return;
+    const newZoom = clamp(pinch.startZoom * pinch.ratio, 0.5, 3);
+    const w = state.pagesWrapper;
+    pinch = null;
+    if (w) { w.style.transform = ''; w.style.transition = ''; }
+    if (Math.abs(newZoom - state.zoom) > 0.01) setZoom(newZoom);
+  }
+  viewer.addEventListener('touchend', (e) => { if (pinch && e.touches.length < 2) endPinch(); });
+  viewer.addEventListener('touchcancel', endPinch);
 
   // Reajusta al ancho al girar el teléfono o redimensionar la ventana.
   let resizeTimer = null;
@@ -592,6 +726,7 @@
       if (idx >= 0) {
         state.isReading = true;
         startKeepAlive();
+        startWatchdog();
         updateControls();
         speakParagraph(idx);
       }
@@ -623,7 +758,148 @@
   window.addEventListener('beforeunload', () => synth.cancel());
 
   /* ====================================================================
-   * 7. UTILIDADES UI
+   * 7. PERSISTENCIA (IndexedDB) Y BIBLIOTECA
+   * ==================================================================== */
+
+  const DB_NAME = 'lector-pdf';
+  const STORE = 'pdfs';
+
+  function openDB() {
+    return new Promise((resolve, reject) => {
+      if (!('indexedDB' in window)) return reject(new Error('IndexedDB no disponible'));
+      const req = indexedDB.open(DB_NAME, 1);
+      req.onupgradeneeded = () => {
+        const db = req.result;
+        if (!db.objectStoreNames.contains(STORE)) {
+          db.createObjectStore(STORE, { keyPath: 'id' });
+        }
+      };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+  }
+
+  async function dbTx(mode, fn) {
+    const db = await openDB();
+    return new Promise((resolve, reject) => {
+      const t = db.transaction(STORE, mode);
+      const req = fn(t.objectStore(STORE));
+      t.oncomplete = () => resolve(req ? req.result : undefined);
+      t.onerror = () => reject(t.error);
+      t.onabort = () => reject(t.error);
+    });
+  }
+
+  const dbPut = (rec) => dbTx('readwrite', (s) => s.put(rec));
+  const dbGet = (id) => dbTx('readonly', (s) => s.get(id));
+  const dbGetAll = () => dbTx('readonly', (s) => s.getAll());
+  const dbDelete = (id) => dbTx('readwrite', (s) => s.delete(id));
+
+  async function updateMeta(id, partial) {
+    try {
+      const rec = await dbGet(id);
+      if (!rec) return;
+      Object.assign(rec, partial);
+      await dbPut(rec);
+    } catch (e) { /* persistencia no disponible */ }
+  }
+
+  // Guarda la posición de lectura (proporción del scroll) y el zoom.
+  let saveTimer = null;
+  function savePosition() {
+    if (!state.currentDocId) return;
+    const max = viewer.scrollHeight - viewer.clientHeight;
+    const frac = max > 0 ? viewer.scrollTop / max : 0;
+    updateMeta(state.currentDocId, { scrollFraction: frac, zoom: state.zoom, savedAt: Date.now() });
+  }
+
+  viewer.addEventListener('scroll', () => {
+    if (!state.currentDocId) return;
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(savePosition, 500);
+  });
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') savePosition();
+  });
+  window.addEventListener('pagehide', savePosition);
+
+  // ---- Biblioteca (lista de PDFs guardados) ----
+  function buildLibrary(container, items) {
+    container.innerHTML = '';
+    const title = document.createElement('h2');
+    title.className = 'library__title';
+    title.textContent = '📚 Mis PDFs guardados';
+    container.appendChild(title);
+
+    if (!items.length) {
+      const p = document.createElement('p');
+      p.className = 'library__empty';
+      p.textContent = 'Aún no has guardado ningún PDF. Ábrelo con “📂 Abrir PDF”.';
+      container.appendChild(p);
+      return;
+    }
+
+    for (const it of items) {
+      const pct = Math.round((it.scrollFraction || 0) * 100);
+      const row = document.createElement('div');
+      row.className = 'lib-item';
+      row.innerHTML =
+        '<span class="lib-item__icon">📕</span>' +
+        '<div class="lib-item__info">' +
+        '<div class="lib-item__name"></div>' +
+        '<div class="lib-item__meta"></div>' +
+        '</div>';
+      row.querySelector('.lib-item__name').textContent = it.name;
+      row.querySelector('.lib-item__meta').textContent =
+        `${it.numPages ? it.numPages + ' págs · ' : ''}` +
+        (pct > 0 ? `vas por ${pct}%` : 'sin empezar');
+
+      const del = document.createElement('button');
+      del.className = 'lib-item__del';
+      del.textContent = '🗑';
+      del.title = 'Eliminar de la biblioteca';
+      del.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        await dbDelete(it.id).catch(() => {});
+        if (state.currentDocId === it.id) state.currentDocId = null;
+        refreshLibrary();
+      });
+      row.appendChild(del);
+
+      row.addEventListener('click', () => openFromLibrary(it.id));
+      container.appendChild(row);
+    }
+  }
+
+  async function refreshLibrary() {
+    let items = [];
+    try { items = (await dbGetAll()) || []; } catch (e) { /* sin persistencia */ }
+    items.sort((a, b) => (b.savedAt || 0) - (a.savedAt || 0));
+    buildLibrary(libraryList, items);
+    buildLibrary(libOverlayList, items);
+  }
+
+  async function openFromLibrary(id) {
+    closeLibraryOverlay();
+    const rec = await dbGet(id).catch(() => null);
+    if (!rec || !rec.blob) { showToast('No se encontró el PDF guardado.'); return; }
+    const buf = await rec.blob.arrayBuffer();
+    await openDocument(buf, rec);
+  }
+
+  function closeLibraryOverlay() { libOverlay.classList.remove('is-open'); }
+
+  libraryBtn.addEventListener('click', async () => {
+    await refreshLibrary();
+    libOverlay.classList.add('is-open');
+  });
+  libCloseBtn.addEventListener('click', closeLibraryOverlay);
+  libOverlay.addEventListener('click', (e) => {
+    if (e.target === libOverlay) closeLibraryOverlay();
+  });
+
+  /* ====================================================================
+   * 8. UTILIDADES UI
    * ==================================================================== */
 
   let toastEl = null;
@@ -643,6 +919,7 @@
     if (toastEl) toastEl.style.display = 'none';
   }
 
-  // Estado inicial de los controles.
+  // Estado inicial de los controles y biblioteca.
   updateControls();
+  refreshLibrary();
 })();

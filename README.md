@@ -17,6 +17,10 @@ no necesita servidor ni instalación.
   seguirlo.
 - 📐 El PDF **se ajusta automáticamente al ancho de la pantalla** (ideal en el
   móvil) y tiene **controles de zoom** (A−, Ajustar, A+).
+- 🤏 **Pellizca con dos dedos** sobre el PDF para acercar/alejar (no usa el zoom
+  del navegador).
+- 💾 **Tus PDFs se guardan en el dispositivo** (biblioteca 📚) y al reabrirlos
+  **vuelves justo a la página donde te quedaste**.
 - ⌨️ Atajo: barra espaciadora para leer / pausar.
 
 ## 🚀 Cómo usar

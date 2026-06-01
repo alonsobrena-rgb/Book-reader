@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <title>Lector de PDF en voz alta</title>
 
   <!-- PWA -->
@@ -29,6 +29,7 @@
         📂 Abrir PDF
         <input type="file" id="fileInput" accept="application/pdf" hidden />
       </label>
+      <button id="libraryBtn" class="btn" title="Mis PDFs guardados">📚 Biblioteca</button>
     </div>
 
     <div class="toolbar__group">
@@ -77,9 +78,19 @@
         <li>Voz femenina en español o inglés</li>
         <li>Velocidad ajustable hasta 2.5x</li>
         <li>Se resalta el párrafo que se está leyendo</li>
+        <li>Pellizca con dos dedos para acercar/alejar</li>
+        <li>Tus PDFs se guardan y recuerdan dónde te quedaste</li>
       </ul>
+
+      <div id="libraryList" class="library"></div>
     </div>
   </main>
+
+  <!-- Overlay de biblioteca (se abre con el botón 📚) -->
+  <div id="libOverlay" class="lib-overlay">
+    <button id="libCloseBtn" class="btn lib-overlay__close">✕ Cerrar</button>
+    <div id="libOverlayList" class="library"></div>
+  </div>
 
   <!-- PDF.js (versión estable) -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
