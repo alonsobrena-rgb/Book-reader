@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lector de PDF en voz alta</title>
+  <link rel="stylesheet" href="css/styles.css" />
+</head>
+<body>
+  <header class="toolbar">
+    <div class="toolbar__group toolbar__brand">
+      <span class="brand__icon">🔊</span>
+      <span class="brand__name">Lector de PDF</span>
+    </div>
+
+    <div class="toolbar__group">
+      <label class="btn btn--file">
+        📂 Abrir PDF
+        <input type="file" id="fileInput" accept="application/pdf" hidden />
+      </label>
+    </div>
+
+    <div class="toolbar__group">
+      <label class="field">
+        <span class="field__label">Idioma</span>
+        <select id="langSelect">
+          <option value="es">Español</option>
+          <option value="en">English</option>
+        </select>
+      </label>
+
+      <label class="field">
+        <span class="field__label">Voz</span>
+        <select id="voiceSelect"></select>
+      </label>
+    </div>
+
+    <div class="toolbar__group">
+      <label class="field field--slider">
+        <span class="field__label">Velocidad: <strong id="rateValue">1.0x</strong></span>
+        <input type="range" id="rateSlider" min="0.5" max="2.5" step="0.1" value="1" />
+      </label>
+    </div>
+
+    <div class="toolbar__group toolbar__group--actions">
+      <button id="playBtn" class="btn btn--play" disabled>▶ Leer</button>
+      <button id="pauseBtn" class="btn btn--pause" disabled>⏸ Pausa</button>
+      <button id="stopBtn" class="btn btn--stop" disabled>⏹ Parar</button>
+    </div>
+  </header>
+
+  <main id="viewer" class="viewer">
+    <div id="emptyState" class="empty-state">
+      <div class="empty-state__icon">📖</div>
+      <h1>Lector de PDF en voz alta</h1>
+      <p>Abre un PDF para empezar. Pulsa <strong>Leer</strong> y la lectura
+         comenzará desde la parte superior de lo que estés viendo en pantalla.</p>
+      <ul>
+        <li>Voz femenina en español o inglés</li>
+        <li>Velocidad ajustable hasta 2.5x</li>
+        <li>Se resalta el párrafo que se está leyendo</li>
+      </ul>
+    </div>
+  </main>
+
+  <!-- PDF.js (versión estable) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
