@@ -1153,8 +1153,12 @@
         (r.positions.length > 1 ? ` · ${r.positions.length} veces` : '') +
         `</span>` + buildSnippet(r.text, r.positions, qlen);
       el.addEventListener('click', () => {
-        goToParagraph(r.pIndex);
-        if (window.innerWidth < 700) closeSearch(); // en móvil deja ver el PDF
+        // Cierra primero (en móvil) y desplaza cuando el layout se reacomode,
+        // si no, el reflujo del panel cancela el desplazamiento.
+        if (window.innerWidth < 700) closeSearch();
+        requestAnimationFrame(() =>
+          requestAnimationFrame(() => goToParagraph(r.pIndex))
+        );
       });
       frag.appendChild(el);
     }

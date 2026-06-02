@@ -1,6 +1,6 @@
 /* Service Worker: cachea la "app shell" para que funcione como app instalada.
  * Los PDFs no se cachean; PDF.js (CDN) se sirve desde la red. */
-const CACHE = 'lector-pdf-v9';
+const CACHE = 'lector-pdf-v10';
 const SHELL = [
   './',
   './index.html',
