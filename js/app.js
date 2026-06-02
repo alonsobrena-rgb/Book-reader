@@ -277,12 +277,22 @@
     const page = await state.pdfDoc.getPage(pageNum);
     const viewport = page.getViewport({ scale: currentScale() });
 
+    // Renderiza a la densidad real de la pantalla para que no se vea borroso
+    // en pantallas de alta resolución (móvil/retina). Se limita a 3x por memoria.
+    const dpr = Math.min(window.devicePixelRatio || 1, 3);
+
     const canvas = document.createElement('canvas');
-    canvas.width = viewport.width;
-    canvas.height = viewport.height;
+    canvas.width = Math.floor(viewport.width * dpr);
+    canvas.height = Math.floor(viewport.height * dpr);
+    canvas.style.width = `${viewport.width}px`;
+    canvas.style.height = `${viewport.height}px`;
     const ctx = canvas.getContext('2d');
 
-    await page.render({ canvasContext: ctx, viewport }).promise;
+    await page.render({
+      canvasContext: ctx,
+      viewport,
+      transform: dpr !== 1 ? [dpr, 0, 0, dpr, 0, 0] : null,
+    }).promise;
 
     pageEl.querySelector('.page__placeholder')?.remove();
     pageEl.insertBefore(canvas, pageEl.firstChild);
