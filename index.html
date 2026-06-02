@@ -102,8 +102,12 @@
     </div>
   </main>
 
-  <!-- Botón flotante de lectura (play/pausa rápido) -->
-  <button id="fab" class="fab" title="Leer / Pausar" hidden>▶</button>
+  <!-- Botones flotantes: retroceder / leer-pausar / avanzar párrafo -->
+  <div class="fab-cluster">
+    <button id="fabPrev" class="fab fab--mini" title="Párrafo anterior" hidden>⏮</button>
+    <button id="fab" class="fab" title="Leer / Pausar" hidden>▶</button>
+    <button id="fabNext" class="fab fab--mini" title="Párrafo siguiente" hidden>⏭</button>
+  </div>
 
   <!-- Overlay de biblioteca (se abre con el botón 📚) -->
   <div id="libOverlay" class="lib-overlay">

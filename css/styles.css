@@ -303,12 +303,17 @@ input[type="range"] {
 }
 .search-empty { color: var(--text-dim); padding: 16px; text-align: center; font-size: 0.9rem; }
 
-/* ---------- Botón flotante (play/pausa) ---------- */
-.fab {
+/* ---------- Botones flotantes (play/pausa + saltar párrafo) ---------- */
+.fab-cluster {
   position: fixed;
   right: 18px;
   bottom: 22px;
   z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.fab {
   width: 60px;
   height: 60px;
   border-radius: 50%;
@@ -324,6 +329,14 @@ input[type="range"] {
 }
 .fab[hidden] { display: none; }
 .fab.is-playing { background: var(--pause); color: #3a2600; }
+.fab--mini {
+  width: 48px;
+  height: 48px;
+  font-size: 1.2rem;
+  background: var(--bg-elevated);
+  color: var(--text);
+  border: 1px solid var(--border);
+}
 
 /* ---------- Biblioteca de PDFs guardados ---------- */
 .library {

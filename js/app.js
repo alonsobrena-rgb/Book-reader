@@ -38,6 +38,8 @@
   const searchResults = document.getElementById('searchResults');
   const searchClose = document.getElementById('searchClose');
   const fab         = document.getElementById('fab');
+  const fabPrev     = document.getElementById('fabPrev');
+  const fabNext     = document.getElementById('fabNext');
   const libraryBtn  = document.getElementById('libraryBtn');
   const libOverlay  = document.getElementById('libOverlay');
   const libCloseBtn = document.getElementById('libCloseBtn');
@@ -690,11 +692,14 @@
     zoomOutBtn.disabled = !hasPdf || state.zoom <= 0.5;
     zoomFitBtn.disabled = !hasPdf;
 
-    // Botón flotante de lectura.
+    // Botones flotantes: play/pausa siempre que haya documento; las flechas
+    // solo mientras se lee (igual que en el menú).
     const playing = state.isReading && !state.isPaused;
     fab.hidden = !hasDoc;
     fab.textContent = playing ? '⏸' : '▶';
     fab.classList.toggle('is-playing', playing);
+    fabPrev.hidden = !state.isReading;
+    fabNext.hidden = !state.isReading;
   }
 
   // Vuelve a maquetar las páginas (zoom o cambio de tamaño). NO interrumpe la
@@ -818,6 +823,8 @@
     rateValue.textContent = `${parseFloat(rateSlider.value).toFixed(1)}x`;
   });
   rateSlider.addEventListener('change', () => {
+    // Recuerda la velocidad para la próxima vez.
+    try { localStorage.setItem('lector-pdf-rate', rateSlider.value); } catch (e) {}
     // Aplica la nueva velocidad de inmediato reiniciando el párrafo actual.
     if (state.isReading && !state.isPaused) {
       const idx = state.currentIndex;
@@ -1017,6 +1024,8 @@
     if (state.isReading && !state.isPaused) pauseReading();
     else startReading();
   });
+  fabPrev.addEventListener('click', () => skipParagraph(-1));
+  fabNext.addEventListener('click', () => skipParagraph(1));
 
   // ---- Buscador de palabras ----
   // Pliega acentos manteniendo la longitud 1:1 con el texto original, para que
@@ -1150,6 +1159,13 @@
   function hideToast() {
     if (toastEl) toastEl.style.display = 'none';
   }
+
+  // Restaura la última velocidad usada.
+  try {
+    const savedRate = localStorage.getItem('lector-pdf-rate');
+    if (savedRate && !isNaN(parseFloat(savedRate))) rateSlider.value = savedRate;
+  } catch (e) {}
+  rateValue.textContent = `${parseFloat(rateSlider.value).toFixed(1)}x`;
 
   // Estado inicial de los controles y biblioteca.
   updateControls();
