@@ -372,7 +372,19 @@
       return { text, left, right, top, bottom, height };
     });
 
-    // Agrupa líneas en párrafos según el espacio vertical entre ellas.
+    // Estadísticas de la página para detectar límites de párrafo.
+    const lefts = lineObjs.map((l) => l.left).sort((a, b) => a - b);
+    const heights = lineObjs.map((l) => l.height).sort((a, b) => a - b);
+    const bodyLeft = lefts[Math.floor(lefts.length / 2)];          // margen izq. típico
+    const bodyRight = Math.max(...lineObjs.map((l) => l.right));    // borde derecho
+    const medianH = heights[Math.floor(heights.length / 2)] || 12;
+    const textWidth = Math.max(1, bodyRight - bodyLeft);
+    const indentThreshold = medianH * 0.6;   // sangría de primera línea
+    const shortThreshold = textWidth * 0.18; // línea final notablemente corta
+
+    // Agrupa líneas en párrafos. Empieza párrafo nuevo si: hay un hueco
+    // vertical, la línea está sangrada (inicio de párrafo) o la línea anterior
+    // terminó corta (fin de párrafo).
     const paras = [];
     let para = null;
     for (let i = 0; i < lineObjs.length; i++) {
@@ -384,9 +396,11 @@
       const prev = lineObjs[i - 1];
       const gap = ln.top - prev.bottom;
       const lineHeight = Math.max(ln.height, prev.height, 1);
-      // Nuevo párrafo si el hueco vertical es grande o hay sangría notable.
-      const bigGap = gap > lineHeight * 0.9;
-      if (bigGap) {
+      const bigGap = gap > lineHeight * 0.6;
+      const indented = (ln.left - bodyLeft) > indentThreshold;
+      const prevShort = (bodyRight - prev.right) > shortThreshold;
+
+      if (bigGap || indented || prevShort) {
         paras.push(para);
         para = newPara(ln);
       } else {
@@ -522,6 +536,7 @@
 
     state.isReading = true;
     state.isPaused = false;
+    acquireWakeLock();
     startKeepAlive();
     startWatchdog();
     updateControls();
@@ -535,6 +550,7 @@
     if (idx < 0) { stopReading(); return; }
     state.isPaused = false;
     state.isReading = true;
+    acquireWakeLock();
     startKeepAlive();
     startWatchdog();
     updateControls();
@@ -606,6 +622,7 @@
   function pauseReading() {
     if (state.isReading && !state.isPaused) {
       state.isPaused = true;
+      releaseWakeLock();
       // Corta la locución; al reanudar se vuelve a leer desde el fragmento
       // guardado (más fiable que synth.pause()/resume(), roto en móvil).
       if (synth.speaking || synth.pending) synth.cancel();
@@ -632,11 +649,29 @@
     state.currentUtterance = null;
     state.currentChunks = null;
     state.currentChunkIndex = 0;
+    releaseWakeLock();
     stopKeepAlive();
     stopWatchdog();
     if (synth.speaking || synth.pending) synth.cancel();
     clearHighlight();
     updateControls();
+  }
+
+  // Wake Lock: mantiene la pantalla encendida mientras lee, para que la
+  // lectura no se detenga al apagarse la pantalla (los navegadores móviles
+  // detienen la síntesis de voz cuando la pantalla se bloquea).
+  let wakeLock = null;
+  async function acquireWakeLock() {
+    try {
+      if ('wakeLock' in navigator && document.visibilityState === 'visible') {
+        wakeLock = await navigator.wakeLock.request('screen');
+        wakeLock.addEventListener('release', () => { wakeLock = null; });
+      }
+    } catch (e) { /* no soportado o denegado */ }
+  }
+  function releaseWakeLock() {
+    try { if (wakeLock) wakeLock.release(); } catch (e) {}
+    wakeLock = null;
   }
 
   // En escritorio, Chrome detiene la síntesis tras ~15s; este "keep alive"
@@ -924,7 +959,12 @@
     saveTimer = setTimeout(savePosition, 500);
   });
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'hidden') savePosition();
+    if (document.visibilityState === 'hidden') {
+      savePosition();
+    } else if (state.isReading && !state.isPaused) {
+      // El wake lock se libera al ocultar la app; lo recuperamos al volver.
+      acquireWakeLock();
+    }
   });
   window.addEventListener('pagehide', savePosition);
 
