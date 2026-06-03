@@ -169,6 +169,7 @@
     if (existing) {
       meta.zoom = existing.zoom || 1;
       meta.scrollFraction = existing.scrollFraction || 0;
+      meta.paraIndex = existing.paraIndex;
     }
     await dbPut(meta).catch((e) => console.warn('No se pudo guardar el PDF:', e));
 
@@ -195,11 +196,23 @@
     await buildAllParagraphs(); // extrae texto/geometría una sola vez
     layoutPages();              // crea las páginas al zoom actual
 
-    // Restaura la posición donde se quedó la última vez.
-    requestAnimationFrame(() => {
+    // Restaura la posición donde se quedó la última vez. Se prioriza el
+    // índice de párrafo (robusto frente a cambios de zoom/tamaño); si no,
+    // se usa la proporción de scroll como respaldo.
+    const restorePosition = () => {
+      const idx = meta.paraIndex;
+      if (Number.isInteger(idx) && idx >= 0 && idx < state.paragraphs.length) {
+        const p = state.paragraphs[idx];
+        const el = state.pageEls[p.pageNum];
+        if (el) {
+          viewer.scrollTop = Math.max(0, pageTop(el) + p.box.top * currentScale() - 12);
+          return;
+        }
+      }
       const max = viewer.scrollHeight - viewer.clientHeight;
       viewer.scrollTop = Math.max(0, (meta.scrollFraction || 0) * max);
-    });
+    };
+    requestAnimationFrame(() => { restorePosition(); requestAnimationFrame(restorePosition); });
 
     if (meta.id) updateMeta(meta.id, { numPages: state.pdfDoc.numPages });
     updateControls();
@@ -701,6 +714,9 @@
     let idleTicks = 0;
     state.watchdogTimer = setInterval(() => {
       if (!state.isReading || state.isPaused) { idleTicks = 0; return; }
+      // En segundo plano la voz se suspende: NO avanzar (si no, recorrería
+      // todos los párrafos hasta el final y perdería la posición).
+      if (document.hidden) { idleTicks = 0; return; }
       if (synth.speaking || synth.pending) { idleTicks = 0; return; }
       idleTicks++;
       // ~1.4s de silencio inesperado => reactiva el avance.
@@ -944,17 +960,26 @@
     } catch (e) { /* persistencia no disponible */ }
   }
 
-  // Guarda la posición de lectura (proporción del scroll) y el zoom.
+  // Guarda la posición de lectura: índice del párrafo visible arriba (robusto)
+  // y la proporción de scroll como respaldo, además del zoom.
   let saveTimer = null;
   function savePosition() {
-    if (!state.currentDocId) return;
+    if (!state.currentDocId || state.paragraphs.length === 0) return;
     const max = viewer.scrollHeight - viewer.clientHeight;
     const frac = max > 0 ? viewer.scrollTop / max : 0;
-    updateMeta(state.currentDocId, { scrollFraction: frac, zoom: state.zoom, savedAt: Date.now() });
+    // Mientras lee, guarda el párrafo en lectura; si no, el visible arriba.
+    const paraIndex = (state.isReading && state.currentIndex >= 0)
+      ? state.currentIndex
+      : findParagraphAtTop();
+    updateMeta(state.currentDocId, {
+      scrollFraction: frac, paraIndex, zoom: state.zoom, savedAt: Date.now(),
+    });
   }
 
   viewer.addEventListener('scroll', () => {
-    if (!state.currentDocId) return;
+    // No guardar por desplazamientos en segundo plano (la voz suspendida puede
+    // provocar auto-scroll hasta el final estando la app oculta).
+    if (!state.currentDocId || document.hidden) return;
     clearTimeout(saveTimer);
     saveTimer = setTimeout(savePosition, 500);
   });
