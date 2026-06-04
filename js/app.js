@@ -138,13 +138,24 @@
       voiceSelect.appendChild(opt);
     });
 
-    // Selecciona por defecto la primera (femenina si existe).
-    voiceSelect.value = matching[0].name;
+    // Selecciona la voz guardada para este idioma si está disponible; si no,
+    // la primera (femenina si existe).
+    let savedVoice = null;
+    try { savedVoice = localStorage.getItem('lector-pdf-voice-' + lang); } catch (e) {}
+    voiceSelect.value = (savedVoice && matching.some((v) => v.name === savedVoice))
+      ? savedVoice
+      : matching[0].name;
   }
 
   function getSelectedVoice() {
     return state.voices.find((v) => v.name === voiceSelect.value) || null;
   }
+
+  // Restaura el idioma guardado antes de poblar las voces.
+  try {
+    const savedLang = localStorage.getItem('lector-pdf-lang');
+    if (savedLang === 'es' || savedLang === 'en') langSelect.value = savedLang;
+  } catch (e) {}
 
   loadVoices();
   if (typeof synth.onvoiceschanged !== 'undefined') {
@@ -1055,11 +1066,14 @@
   nextBtn.addEventListener('click', () => skipParagraph(1));
 
   langSelect.addEventListener('change', () => {
+    try { localStorage.setItem('lector-pdf-lang', langSelect.value); } catch (e) {}
     populateVoiceSelect();
     if (state.isReading) stopReading();
   });
 
   voiceSelect.addEventListener('change', () => {
+    // Recuerda la voz elegida para este idioma.
+    try { localStorage.setItem('lector-pdf-voice-' + langSelect.value, voiceSelect.value); } catch (e) {}
     // Si cambia la voz durante la lectura, reinicia desde el párrafo actual.
     if (state.isReading) {
       const idx = state.currentIndex;
