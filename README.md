@@ -27,6 +27,11 @@ no necesita servidor ni instalación.
   la coincidencia resaltada; al tocar un resultado salta a ese punto del PDF.
 - ☰ **Menú desplegable** que oculta los controles para dejar más espacio al PDF,
   con un **botón flotante** para leer/pausar al instante.
+- 🔊 **Voz offline (experimental)**: genera la voz en el propio teléfono (Piper
+  por WASM) y la reproduce como audio real, por lo que **sigue sonando con la
+  pantalla bloqueada / en segundo plano** y muestra controles en la pantalla de
+  bloqueo. Se activa con el interruptor del menú; descarga el modelo de voz la
+  primera vez (necesita internet esa vez).
 - ⌨️ Atajo: barra espaciadora para leer / pausar.
 
 ## 🚀 Cómo usar

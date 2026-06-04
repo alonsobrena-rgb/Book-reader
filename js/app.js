@@ -40,6 +40,8 @@
   const fab         = document.getElementById('fab');
   const fabPrev     = document.getElementById('fabPrev');
   const fabNext     = document.getElementById('fabNext');
+  const offlineToggle = document.getElementById('offlineToggle');
+  const audioEl     = document.getElementById('ttsAudio');
   const libraryBtn  = document.getElementById('libraryBtn');
   const libOverlay  = document.getElementById('libOverlay');
   const libCloseBtn = document.getElementById('libCloseBtn');
@@ -69,6 +71,8 @@
     currentUtterance: null, // referencia fuerte (evita que el GC corte la voz)
     advanceCurrent: null,   // avanza al siguiente fragmento (usado por watchdog)
     currentDocId: null,     // id del PDF abierto (para guardar la posición)
+    currentDocName: '',     // nombre del PDF (para Media Session)
+    engine: 'system',       // motor de voz: 'system' (Web Speech) | 'offline' (Piper)
     pageDims: [],           // dimensiones (escala 1) por página
     io: null,               // IntersectionObserver para render perezoso
     currentChunks: null,    // fragmentos del párrafo en curso (para reanudar)
@@ -191,6 +195,7 @@
     }
 
     state.currentDocId = meta.id || null;
+    state.currentDocName = meta.name || 'Lectura';
     state.zoom = meta.zoom || 1;
     await computeFitScale();
     await buildAllParagraphs(); // extrae texto/geometría una sola vez
@@ -550,23 +555,47 @@
     state.isReading = true;
     state.isPaused = false;
     acquireWakeLock();
+    updateControls();
+
+    if (isOffline()) {
+      unlockAudio(); // habilita el reproductor dentro del gesto del usuario
+      ensureOfflineVoice()
+        .then(() => { if (state.isReading) speakParagraph(startIndex); })
+        .catch((e) => {
+          console.warn('Voz offline no disponible:', e);
+          showToast('No se pudo cargar la voz offline.');
+          stopReading();
+        });
+      return;
+    }
+
     startKeepAlive();
     startWatchdog();
-    updateControls();
     speakParagraph(startIndex);
   }
 
-  // Reanuda manualmente desde el fragmento guardado (pause()/resume() del
-  // navegador no es fiable, sobre todo en móvil).
+  // Reanuda desde donde se quedó.
   function resumeReading() {
     const idx = state.currentIndex >= 0 ? state.currentIndex : findParagraphAtTop();
     if (idx < 0) { stopReading(); return; }
     state.isPaused = false;
     state.isReading = true;
     acquireWakeLock();
+    updateControls();
+
+    if (isOffline()) {
+      unlockAudio();
+      // Reanuda el audio actual donde quedó; si ya terminó, sigue el fragmento.
+      if (audioEl.src && !audioEl.ended && audioEl.currentTime > 0) {
+        audioEl.play().catch(() => offlinePlayUnit());
+      } else {
+        offlinePlayUnit();
+      }
+      return;
+    }
+
     startKeepAlive();
     startWatchdog();
-    updateControls();
     const chunks = (state.currentChunks && state.currentChunks.length)
       ? state.currentChunks
       : chunkText(state.paragraphs[idx].text);
@@ -587,7 +616,9 @@
     const chunks = chunkText(state.paragraphs[index].text);
     state.currentChunks = chunks;
     state.currentChunkIndex = 0;
-    speakChunks(chunks, 0, index);
+
+    if (isOffline()) offlinePlayUnit();
+    else speakChunks(chunks, 0, index);
   }
 
   function speakChunks(chunks, ci, pIndex) {
@@ -636,9 +667,13 @@
     if (state.isReading && !state.isPaused) {
       state.isPaused = true;
       releaseWakeLock();
-      // Corta la locución; al reanudar se vuelve a leer desde el fragmento
-      // guardado (más fiable que synth.pause()/resume(), roto en móvil).
-      if (synth.speaking || synth.pending) synth.cancel();
+      if (isOffline()) {
+        try { audioEl.pause(); } catch (e) {}
+      } else if (synth.speaking || synth.pending) {
+        // Corta la locución; al reanudar se relee desde el fragmento guardado
+        // (más fiable que synth.pause()/resume(), roto en móvil).
+        synth.cancel();
+      }
       updateControls();
     }
   }
@@ -649,7 +684,12 @@
     const base = state.currentIndex >= 0 ? state.currentIndex : 0;
     const idx = clamp(base + delta, 0, state.paragraphs.length - 1);
     state.isPaused = false;
-    synth.cancel();            // corta la locución actual (se ignora "canceled")
+    if (isOffline()) {
+      try { audioEl.pause(); } catch (e) {}
+      offline.prefetch = null;
+    } else {
+      synth.cancel();          // corta la locución actual (se ignora "canceled")
+    }
     speakParagraph(idx);       // empieza a leer desde el nuevo párrafo
     updateControls();
   }
@@ -666,6 +706,8 @@
     stopKeepAlive();
     stopWatchdog();
     if (synth.speaking || synth.pending) synth.cancel();
+    try { audioEl.pause(); } catch (e) {}
+    offline.prefetch = null;
     clearHighlight();
     updateControls();
   }
@@ -732,6 +774,158 @@
       state.watchdogTimer = null;
     }
   }
+
+  /* ====================================================================
+   * 5b. MOTOR DE VOZ OFFLINE (Piper / VITS por WASM)
+   *  - Genera audio real en el dispositivo y lo reproduce con <audio>, lo que
+   *    permite que suene con la pantalla bloqueada / en segundo plano y muestre
+   *    controles en la pantalla de bloqueo (Media Session API).
+   * ==================================================================== */
+
+  // Voces femeninas por idioma (modelos Piper de rhasspy/piper-voices).
+  const OFFLINE_VOICES = {
+    es: 'es_ES-sharvard-medium',
+    en: 'en_US-hfc_female-medium',
+  };
+  // WAV silencioso para "desbloquear" el reproductor dentro de un gesto.
+  const SILENT_WAV =
+    'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=';
+
+  const offline = { module: null, loading: null, prefetch: null, lastUrl: null };
+
+  function isOffline() { return state.engine === 'offline'; }
+  function offlineVoiceId() { return OFFLINE_VOICES[langSelect.value] || OFFLINE_VOICES.es; }
+
+  // Carga perezosa de la librería de TTS por WASM.
+  function loadTtsModule() {
+    if (offline.module) return Promise.resolve(offline.module);
+    if (!offline.loading) {
+      offline.loading = import('https://esm.sh/@diffusionstudio/vits-web')
+        .then((m) => { offline.module = m; return m; });
+    }
+    return offline.loading;
+  }
+
+  // Asegura que el modelo de voz del idioma esté descargado (con progreso).
+  async function ensureOfflineVoice() {
+    const m = await loadTtsModule();
+    const voiceId = offlineVoiceId();
+    let stored = [];
+    try { stored = (await m.stored()) || []; } catch (e) {}
+    if (!stored.includes(voiceId)) {
+      showToast('Descargando voz offline… 0%');
+      await m.download(voiceId, (p) => {
+        const pct = p && p.total ? Math.round((p.loaded * 100) / p.total) : 0;
+        showToast(`Descargando voz offline… ${pct}%`);
+      });
+      hideToast();
+    }
+  }
+
+  // Genera el audio de un texto y devuelve una URL de objeto reproducible.
+  async function synthOffline(text) {
+    const m = await loadTtsModule();
+    const wav = await m.predict({ text, voiceId: offlineVoiceId() });
+    return URL.createObjectURL(wav);
+  }
+
+  // Habilita el elemento <audio> dentro del gesto del usuario (autoplay).
+  function unlockAudio() {
+    if (audioEl.dataset.unlocked === '1') return;
+    try {
+      audioEl.src = SILENT_WAV;
+      const p = audioEl.play();
+      if (p && p.then) p.then(() => { audioEl.pause(); }).catch(() => {});
+      audioEl.dataset.unlocked = '1';
+    } catch (e) {}
+  }
+
+  // Reproduce el fragmento actual (state.currentChunkIndex del párrafo actual).
+  async function offlinePlayUnit() {
+    if (!state.isReading || state.isPaused || !isOffline()) return;
+    const chunks = state.currentChunks || [];
+    const ci = state.currentChunkIndex;
+    if (ci >= chunks.length) { speakParagraph(state.currentIndex + 1); return; }
+
+    const text = chunks[ci];
+    try {
+      let url;
+      if (offline.prefetch && offline.prefetch.key === text) {
+        url = await offline.prefetch.promise;
+      } else {
+        url = await synthOffline(text);
+      }
+      if (!state.isReading || state.isPaused || !isOffline()) return;
+
+      if (offline.lastUrl && offline.lastUrl !== url) {
+        try { URL.revokeObjectURL(offline.lastUrl); } catch (e) {}
+      }
+      offline.lastUrl = url;
+
+      setMediaSession();
+      audioEl.src = url;
+      audioEl.playbackRate = clamp(parseFloat(rateSlider.value), 0.5, 2.5);
+      await audioEl.play().catch(() => {});
+      prefetchNextUnit(); // adelanta el siguiente para que no haya silencios
+    } catch (e) {
+      console.warn('Fallo al generar voz offline:', e);
+      showToast('No se pudo generar la voz offline.');
+      stopReading();
+    }
+  }
+
+  // Texto del siguiente fragmento (dentro del párrafo o el inicio del próximo).
+  function nextUnitText() {
+    const chunks = state.currentChunks || [];
+    const ci = state.currentChunkIndex + 1;
+    if (ci < chunks.length) return chunks[ci];
+    const np = state.currentIndex + 1;
+    if (np < state.paragraphs.length) {
+      const c = chunkText(state.paragraphs[np].text);
+      return c[0] || null;
+    }
+    return null;
+  }
+
+  function prefetchNextUnit() {
+    const text = nextUnitText();
+    if (!text) { offline.prefetch = null; return; }
+    if (offline.prefetch && offline.prefetch.key === text) return;
+    offline.prefetch = { key: text, promise: synthOffline(text).catch(() => null) };
+  }
+
+  // Al terminar un fragmento de audio, avanza al siguiente.
+  audioEl.addEventListener('ended', () => {
+    if (!state.isReading || state.isPaused || !isOffline()) return;
+    state.currentChunkIndex++;
+    offlinePlayUnit();
+  });
+
+  // Controles en la pantalla de bloqueo (play/pausa/saltar párrafo).
+  function setMediaSession() {
+    if (!('mediaSession' in navigator)) return;
+    try {
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title: state.currentDocName || 'Lectura',
+        artist: 'Lector de PDF',
+      });
+      navigator.mediaSession.setActionHandler('play', () => startReading());
+      navigator.mediaSession.setActionHandler('pause', () => pauseReading());
+      navigator.mediaSession.setActionHandler('nexttrack', () => skipParagraph(1));
+      navigator.mediaSession.setActionHandler('previoustrack', () => skipParagraph(-1));
+    } catch (e) {}
+  }
+
+  // Interruptor de motor de voz.
+  offlineToggle.addEventListener('change', () => {
+    state.engine = offlineToggle.checked ? 'offline' : 'system';
+    try { localStorage.setItem('lector-pdf-engine', state.engine); } catch (e) {}
+    if (state.isReading) stopReading(); // cambia de motor: reinicia con Leer
+    if (offlineToggle.checked) {
+      showToast('Preparando voz offline…', 1500);
+      loadTtsModule().catch(() => showToast('No se pudo cargar la voz offline.'));
+    }
+  });
 
   /* ====================================================================
    * 6. CONTROLES DE LA INTERFAZ
@@ -886,6 +1080,11 @@
   rateSlider.addEventListener('change', () => {
     // Recuerda la velocidad para la próxima vez.
     try { localStorage.setItem('lector-pdf-rate', rateSlider.value); } catch (e) {}
+    if (isOffline()) {
+      // El audio cambia de velocidad al vuelo (sin regenerar).
+      audioEl.playbackRate = clamp(parseFloat(rateSlider.value), 0.5, 2.5);
+      return;
+    }
     // Aplica la nueva velocidad de inmediato reiniciando el párrafo actual.
     if (state.isReading && !state.isPaused) {
       const idx = state.currentIndex;
@@ -1245,6 +1444,15 @@
     if (savedRate && !isNaN(parseFloat(savedRate))) rateSlider.value = savedRate;
   } catch (e) {}
   rateValue.textContent = `${parseFloat(rateSlider.value).toFixed(1)}x`;
+
+  // Restaura el motor de voz elegido (sistema u offline).
+  try {
+    if (localStorage.getItem('lector-pdf-engine') === 'offline') {
+      state.engine = 'offline';
+      offlineToggle.checked = true;
+      loadTtsModule().catch(() => {});
+    }
+  } catch (e) {}
 
   // Estado inicial de los controles y biblioteca.
   updateControls();

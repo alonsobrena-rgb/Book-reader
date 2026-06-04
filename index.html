@@ -51,6 +51,14 @@
     </div>
 
     <div class="menu-row">
+      <label class="switch" title="Genera la voz en tu teléfono; suena con la pantalla bloqueada">
+        <input type="checkbox" id="offlineToggle" />
+        <span class="switch__track"><span class="switch__thumb"></span></span>
+        <span>🔊 Voz offline (suena bloqueada)</span>
+      </label>
+    </div>
+
+    <div class="menu-row">
       <label class="field field--slider">
         <span class="field__label">Velocidad: <strong id="rateValue">1.0x</strong></span>
         <input type="range" id="rateSlider" min="0.5" max="2.5" step="0.1" value="1" />
@@ -108,6 +116,9 @@
     <button id="fab" class="fab" title="Leer / Pausar" hidden>▶</button>
     <button id="fabNext" class="fab fab--mini" title="Párrafo siguiente" hidden>⏭</button>
   </div>
+
+  <!-- Reproductor para la voz offline (audio real: suena bloqueado) -->
+  <audio id="ttsAudio" hidden></audio>
 
   <!-- Overlay de biblioteca (se abre con el botón 📚) -->
   <div id="libOverlay" class="lib-overlay">
