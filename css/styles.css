@@ -437,6 +437,25 @@ input[type="range"] {
   margin: 0 auto 8px;
 }
 
+/* ---------- Estado de la voz offline ---------- */
+.tts-status {
+  position: fixed;
+  top: 56px;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: 92%;
+  background: var(--accent-strong);
+  color: #fff;
+  padding: 8px 14px;
+  border-radius: 10px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  box-shadow: 0 6px 22px rgba(0, 0, 0, 0.5);
+  z-index: 55;
+  text-align: center;
+}
+.tts-status--error { background: var(--stop); }
+
 /* ---------- Toast / loader ---------- */
 .toast {
   position: fixed;

@@ -557,6 +557,7 @@
   function startReading() {
     if (!state.pdfDoc || state.paragraphs.length === 0) return;
     closeMenu(); // deja ver el PDF mientras lee
+    if (isOffline()) setStatus(null); // limpia errores previos al reintentar
     if (state.isPaused) { resumeReading(); return; } // reanudar
     if (state.isReading) return;
 
@@ -719,6 +720,8 @@
     if (synth.speaking || synth.pending) synth.cancel();
     try { audioEl.pause(); } catch (e) {}
     offline.prefetch = null;
+    // Conserva el estado si es un error (para poder leerlo); si no, lo oculta.
+    if (statusEl && !statusEl.classList.contains('tts-status--error')) setStatus(null);
     clearHighlight();
     updateControls();
   }
@@ -820,12 +823,38 @@
   function isOffline() { return state.engine === 'offline'; }
   function offlineVoiceId() { return OFFLINE_VOICES[langSelect.value] || OFFLINE_VOICES.es; }
 
+  // Indicador de estado visible (para ver en qué paso va o qué falla).
+  let statusEl = null;
+  function setStatus(msg, isError) {
+    if (!statusEl) {
+      statusEl = document.createElement('div');
+      statusEl.className = 'tts-status';
+      document.body.appendChild(statusEl);
+    }
+    if (!msg) { statusEl.style.display = 'none'; return; }
+    statusEl.textContent = msg;
+    statusEl.classList.toggle('tts-status--error', !!isError);
+    statusEl.style.display = 'block';
+  }
+
   // Carga perezosa de la librería de TTS por WASM.
   function loadTtsModule() {
     if (offline.module) return Promise.resolve(offline.module);
     if (!offline.loading) {
+      setStatus('Cargando motor de voz…');
       offline.loading = import('https://esm.sh/@diffusionstudio/vits-web')
-        .then((m) => { offline.module = m; return m; });
+        .then((m) => {
+          if (typeof m.predict !== 'function') {
+            throw new Error('El motor de voz no expone predict().');
+          }
+          offline.module = m;
+          return m;
+        })
+        .catch((e) => {
+          offline.loading = null; // permite reintentar
+          setStatus('No se pudo cargar el motor de voz: ' + (e && e.message || e), true);
+          throw e;
+        });
     }
     return offline.loading;
   }
@@ -837,13 +866,13 @@
     let stored = [];
     try { stored = (await m.stored()) || []; } catch (e) {}
     if (!stored.includes(voiceId)) {
-      showToast('Descargando voz offline… 0%');
+      setStatus('Descargando voz… 0%');
       await m.download(voiceId, (p) => {
         const pct = p && p.total ? Math.round((p.loaded * 100) / p.total) : 0;
-        showToast(`Descargando voz offline… ${pct}%`);
+        setStatus(`Descargando voz… ${pct}%`);
       });
-      hideToast();
     }
+    setStatus('Voz lista, generando…');
   }
 
   // Genera el audio de un texto y devuelve una URL de objeto reproducible.
@@ -878,17 +907,16 @@
       if (offline.prefetch && offline.prefetch.key === text) {
         url = await offline.prefetch.promise;
       } else {
-        showToast('Generando voz…');
+        setStatus('Generando audio…');
         url = await synthOffline(text);
-        hideToast();
       }
     } catch (e) {
       console.warn('Fallo al generar voz offline:', e);
-      showToast('No se pudo generar la voz offline: ' + (e && e.message || e), 4000);
+      setStatus('No se pudo generar la voz: ' + (e && e.message || e), true);
       stopReading();
       return;
     }
-    if (!url) { showToast('La voz offline no devolvió audio.', 4000); stopReading(); return; }
+    if (!url) { setStatus('La voz no devolvió audio.', true); stopReading(); return; }
     if (!state.isReading || state.isPaused || !isOffline()) return;
 
     if (offline.lastUrl && offline.lastUrl !== url) {
@@ -902,6 +930,7 @@
 
     try {
       await audioEl.play();
+      setStatus('🔊 Leyendo (voz offline)');
       prefetchNextUnit(); // adelanta el siguiente para que no haya silencios
     } catch (err) {
       // Autoplay bloqueado: deja en pausa para que el siguiente toque reanude.
@@ -909,7 +938,7 @@
       state.isPaused = true;
       releaseWakeLock();
       updateControls();
-      showToast('Toca ▶ otra vez para reproducir la voz.', 4000);
+      setStatus('Bloqueo de reproducción (' + (err && err.name) + '). Toca ▶ otra vez.', true);
     }
   }
 
@@ -943,7 +972,7 @@
     if (!isOffline() || !state.isReading) return;
     const err = audioEl.error;
     console.warn('Error de audio:', err);
-    showToast('Error al reproducir el audio' + (err ? ` (código ${err.code})` : ''), 4000);
+    setStatus('Error al reproducir el audio' + (err ? ` (código ${err.code})` : ''), true);
   });
 
   // Controles en la pantalla de bloqueo (play/pausa/saltar párrafo).
@@ -967,8 +996,9 @@
     try { localStorage.setItem('lector-pdf-engine', state.engine); } catch (e) {}
     if (state.isReading) stopReading(); // cambia de motor: reinicia con Leer
     if (offlineToggle.checked) {
-      showToast('Preparando voz offline…', 1500);
-      loadTtsModule().catch(() => showToast('No se pudo cargar la voz offline.'));
+      loadTtsModule().catch(() => {}); // el estado mostrará el error si lo hay
+    } else {
+      setStatus(null);
     }
   });
 
