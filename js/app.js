@@ -798,9 +798,22 @@
     es: 'es_ES-sharvard-medium',
     en: 'en_US-hfc_female-medium',
   };
-  // WAV silencioso para "desbloquear" el reproductor dentro de un gesto.
-  const SILENT_WAV =
-    'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=';
+  // WAV silencioso válido para "desbloquear" el reproductor dentro de un gesto
+  // (necesario para que luego se pueda reproducir tras la descarga/generación).
+  function makeSilentWavUrl() {
+    const sampleRate = 8000, samples = 800; // ~0.1s de silencio
+    const dataSize = samples * 2;
+    const buf = new ArrayBuffer(44 + dataSize);
+    const dv = new DataView(buf);
+    const w = (o, s) => { for (let i = 0; i < s.length; i++) dv.setUint8(o + i, s.charCodeAt(i)); };
+    w(0, 'RIFF'); dv.setUint32(4, 36 + dataSize, true); w(8, 'WAVE');
+    w(12, 'fmt '); dv.setUint32(16, 16, true); dv.setUint16(20, 1, true); dv.setUint16(22, 1, true);
+    dv.setUint32(24, sampleRate, true); dv.setUint32(28, sampleRate * 2, true);
+    dv.setUint16(32, 2, true); dv.setUint16(34, 16, true);
+    w(36, 'data'); dv.setUint32(40, dataSize, true);
+    return URL.createObjectURL(new Blob([buf], { type: 'audio/wav' }));
+  }
+  let silentUrl = null;
 
   const offline = { module: null, loading: null, prefetch: null, lastUrl: null };
 
@@ -842,12 +855,13 @@
 
   // Habilita el elemento <audio> dentro del gesto del usuario (autoplay).
   function unlockAudio() {
-    if (audioEl.dataset.unlocked === '1') return;
     try {
-      audioEl.src = SILENT_WAV;
+      if (!silentUrl) silentUrl = makeSilentWavUrl();
+      audioEl.muted = false;
+      audioEl.volume = 1;
+      audioEl.src = silentUrl;
       const p = audioEl.play();
       if (p && p.then) p.then(() => { audioEl.pause(); }).catch(() => {});
-      audioEl.dataset.unlocked = '1';
     } catch (e) {}
   }
 
@@ -859,29 +873,43 @@
     if (ci >= chunks.length) { speakParagraph(state.currentIndex + 1); return; }
 
     const text = chunks[ci];
+    let url;
     try {
-      let url;
       if (offline.prefetch && offline.prefetch.key === text) {
         url = await offline.prefetch.promise;
       } else {
+        showToast('Generando voz…');
         url = await synthOffline(text);
+        hideToast();
       }
-      if (!state.isReading || state.isPaused || !isOffline()) return;
-
-      if (offline.lastUrl && offline.lastUrl !== url) {
-        try { URL.revokeObjectURL(offline.lastUrl); } catch (e) {}
-      }
-      offline.lastUrl = url;
-
-      setMediaSession();
-      audioEl.src = url;
-      audioEl.playbackRate = clamp(parseFloat(rateSlider.value), 0.5, 2.5);
-      await audioEl.play().catch(() => {});
-      prefetchNextUnit(); // adelanta el siguiente para que no haya silencios
     } catch (e) {
       console.warn('Fallo al generar voz offline:', e);
-      showToast('No se pudo generar la voz offline.');
+      showToast('No se pudo generar la voz offline: ' + (e && e.message || e), 4000);
       stopReading();
+      return;
+    }
+    if (!url) { showToast('La voz offline no devolvió audio.', 4000); stopReading(); return; }
+    if (!state.isReading || state.isPaused || !isOffline()) return;
+
+    if (offline.lastUrl && offline.lastUrl !== url) {
+      try { URL.revokeObjectURL(offline.lastUrl); } catch (e) {}
+    }
+    offline.lastUrl = url;
+
+    setMediaSession();
+    audioEl.src = url;
+    audioEl.playbackRate = clamp(parseFloat(rateSlider.value), 0.5, 2.5);
+
+    try {
+      await audioEl.play();
+      prefetchNextUnit(); // adelanta el siguiente para que no haya silencios
+    } catch (err) {
+      // Autoplay bloqueado: deja en pausa para que el siguiente toque reanude.
+      console.warn('play() falló:', err);
+      state.isPaused = true;
+      releaseWakeLock();
+      updateControls();
+      showToast('Toca ▶ otra vez para reproducir la voz.', 4000);
     }
   }
 
@@ -910,6 +938,12 @@
     if (!state.isReading || state.isPaused || !isOffline()) return;
     state.currentChunkIndex++;
     offlinePlayUnit();
+  });
+  audioEl.addEventListener('error', () => {
+    if (!isOffline() || !state.isReading) return;
+    const err = audioEl.error;
+    console.warn('Error de audio:', err);
+    showToast('Error al reproducir el audio' + (err ? ` (código ${err.code})` : ''), 4000);
   });
 
   // Controles en la pantalla de bloqueo (play/pausa/saltar párrafo).
