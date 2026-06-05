@@ -680,6 +680,7 @@
       state.isPaused = true;
       releaseWakeLock();
       if (isOffline()) {
+        offline.expectingEnd = false;
         try { audioEl.pause(); } catch (e) {}
       } else if (synth.speaking || synth.pending) {
         // Corta la locución; al reanudar se relee desde el fragmento guardado
@@ -718,6 +719,7 @@
     stopKeepAlive();
     stopWatchdog();
     if (synth.speaking || synth.pending) synth.cancel();
+    offline.expectingEnd = false;
     try { audioEl.pause(); } catch (e) {}
     offline.prefetch = null;
     // Conserva el estado si es un error (para poder leerlo); si no, lo oculta.
@@ -818,7 +820,7 @@
   }
   let silentUrl = null;
 
-  const offline = { module: null, loading: null, prefetch: null, lastUrl: null };
+  const offline = { module: null, loading: null, prefetch: null, lastUrl: null, expectingEnd: false };
 
   function isOffline() { return state.engine === 'offline'; }
   function offlineVoiceId() { return OFFLINE_VOICES[langSelect.value] || OFFLINE_VOICES.es; }
@@ -886,6 +888,7 @@
   function unlockAudio() {
     try {
       if (!silentUrl) silentUrl = makeSilentWavUrl();
+      offline.expectingEnd = false; // este audio silencioso no debe avanzar
       audioEl.muted = false;
       audioEl.volume = 1;
       audioEl.src = silentUrl;
@@ -929,6 +932,7 @@
     audioEl.playbackRate = clamp(parseFloat(rateSlider.value), 0.5, 2.5);
 
     try {
+      offline.expectingEnd = true; // este sí es audio real: al terminar, avanza
       await audioEl.play();
       setStatus('🔊 Leyendo (voz offline)');
       prefetchNextUnit(); // adelanta el siguiente para que no haya silencios
@@ -964,7 +968,11 @@
 
   // Al terminar un fragmento de audio, avanza al siguiente.
   audioEl.addEventListener('ended', () => {
-    if (!state.isReading || state.isPaused || !isOffline()) return;
+    // Solo avanza si era audio real (no el silencioso de desbloqueo). Esto
+    // evita que al activar la lectura se salte hasta el final del PDF.
+    if (!offline.expectingEnd) return;
+    offline.expectingEnd = false;
+    if (!state.isReading || state.isPaused || !isOffline() || !state.currentChunks) return;
     state.currentChunkIndex++;
     offlinePlayUnit();
   });
