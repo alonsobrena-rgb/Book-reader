@@ -554,8 +554,13 @@
     return chunks;
   }
 
+  // Cuenta locuciones que "terminan" al instante (voz que no suena). Si pasa
+  // varias veces seguidas, se detiene en vez de avanzar hasta el final del PDF.
+  let instantEnds = 0;
+
   function startReading() {
     if (!state.pdfDoc || state.paragraphs.length === 0) return;
+    instantEnds = 0;
     closeMenu(); // deja ver el PDF mientras lee
     if (isOffline()) setStatus(null); // limpia errores previos al reintentar
     if (state.isPaused) { resumeReading(); return; } // reanudar
@@ -657,21 +662,36 @@
 
     // Avanza al siguiente fragmento una sola vez (onend, onerror o watchdog).
     let advanced = false;
-    const advance = () => {
+    let speakTime = 0;
+    const advance = (failed) => {
       if (advanced) return;
       advanced = true;
       state.advanceCurrent = null;
+
+      // Cortacircuitos: si la locución "terminó" casi al instante (o falló),
+      // la voz no está sonando; tras varias seguidas, detener y avisar.
+      const elapsed = Date.now() - speakTime;
+      if (failed || elapsed < 250) instantEnds++;
+      else instantEnds = 0;
+      if (instantEnds >= 3) {
+        instantEnds = 0;
+        setStatus('La voz del navegador no está leyendo. Prueba otra voz en el menú o recarga la página.', true);
+        stopReading();
+        return;
+      }
+
       if (state.isReading) speakChunks(chunks, ci + 1, pIndex);
     };
-    state.advanceCurrent = advance;
+    state.advanceCurrent = () => advance(false);
 
-    utter.onend = advance;
+    utter.onend = () => advance(false);
     utter.onerror = (e) => {
       if (e.error === 'interrupted' || e.error === 'canceled') return;
       console.warn('Error de síntesis:', e.error);
-      advance();
+      advance(true);
     };
 
+    speakTime = Date.now();
     synth.speak(utter);
   }
 
@@ -710,6 +730,7 @@
   function stopReading() {
     state.isReading = false;
     state.isPaused = false;
+    instantEnds = 0;
     state.currentIndex = -1;
     state.advanceCurrent = null;
     state.currentUtterance = null;
