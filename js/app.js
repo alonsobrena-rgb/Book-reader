@@ -503,6 +503,17 @@
     return el ? pageTop(el) + p.box.top * currentScale() : 0;
   }
 
+  // ¿El párrafo está visible ahora mismo en la ventana del visor?
+  function paragraphVisible(index) {
+    const p = state.paragraphs[index];
+    if (!p || !state.pageEls[p.pageNum]) return false;
+    const top = paragraphTop(p);
+    const bottom = top + p.box.height * currentScale();
+    const vTop = viewer.scrollTop;
+    const vBottom = vTop + viewer.clientHeight;
+    return bottom > vTop + 4 && top < vBottom - 4;
+  }
+
   function scrollParagraphIntoView(index) {
     const p = state.paragraphs[index];
     if (!p || !state.pageEls[p.pageNum]) return;
@@ -593,13 +604,26 @@
 
   // Reanuda desde donde se quedó.
   function resumeReading() {
-    const idx = state.currentIndex >= 0 ? state.currentIndex : findParagraphAtTop();
-    if (idx < 0) { stopReading(); return; }
     state.isPaused = false;
     state.isReading = true;
     acquireWakeLock();
     updateControls();
 
+    // Si el usuario se movió a otra parte del PDF, empieza desde lo que está
+    // arriba en pantalla; si sigue en el mismo párrafo, reanuda donde quedó.
+    const resumeInPlace = state.currentIndex >= 0 && paragraphVisible(state.currentIndex);
+
+    if (!resumeInPlace) {
+      const idx = findParagraphAtTop();
+      if (idx < 0) { stopReading(); return; }
+      offline.expectingEnd = false;
+      if (isOffline()) unlockAudio();
+      else { startKeepAlive(); startWatchdog(); }
+      speakParagraph(idx);
+      return;
+    }
+
+    const idx = state.currentIndex;
     if (isOffline()) {
       unlockAudio();
       // Reanuda el audio actual donde quedó; si ya terminó, sigue el fragmento.
@@ -1484,9 +1508,9 @@
         (r.positions.length > 1 ? ` · ${r.positions.length} veces` : '') +
         `</span>` + buildSnippet(r.text, r.positions, qlen);
       el.addEventListener('click', () => {
-        // Cierra primero (en móvil) y desplaza cuando el layout se reacomode,
-        // si no, el reflujo del panel cancela el desplazamiento.
-        if (window.innerWidth < 700) closeSearch();
+        // Cierra el buscador y desplaza cuando el layout se reacomode (si no,
+        // el reflujo del panel cancela el desplazamiento).
+        closeSearch();
         requestAnimationFrame(() =>
           requestAnimationFrame(() => goToParagraph(r.pIndex))
         );
@@ -1519,9 +1543,20 @@
     const p = state.paragraphs[i];
     if (!p || !state.pageEls[p.pageNum]) return;
     state.currentIndex = i;
-    highlightParagraph(i);
-    const top = paragraphTop(p);
-    viewer.scrollTo({ top: Math.max(0, top - 90), behavior: 'smooth' });
+    // Desplazamiento instantáneo y fiable (el suave a veces se cancela por el
+    // reflujo al cerrar el panel de búsqueda).
+    const prev = viewer.style.scrollBehavior;
+    viewer.style.scrollBehavior = 'auto';
+    const apply = () => {
+      const top = paragraphTop(p);
+      viewer.scrollTop = Math.max(0, top - 90);
+      highlightParagraph(i);
+    };
+    apply();
+    requestAnimationFrame(() => {
+      apply();
+      viewer.style.scrollBehavior = prev;
+    });
   }
 
   /* ====================================================================
