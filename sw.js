@@ -1,6 +1,6 @@
 /* Service Worker: cachea la "app shell" para que funcione como app instalada.
  * Los PDFs no se cachean; PDF.js (CDN) se sirve desde la red. */
-const CACHE = 'lector-pdf-v18';
+const CACHE = 'lector-pdf-v19';
 const SHELL = [
   './',
   './index.html',
@@ -36,19 +36,17 @@ self.addEventListener('fetch', (event) => {
   // Solo gestionamos peticiones del propio origen (la app).
   if (url.origin !== self.location.origin) return;
 
-  // Estrategia: cache primero, con respaldo en red y actualización.
+  // Estrategia: RED PRIMERO (para recibir siempre la última versión), con
+  // respaldo en caché si no hay conexión.
   event.respondWith(
-    caches.match(request).then((cached) => {
-      const fetched = fetch(request)
-        .then((res) => {
-          if (res && res.status === 200 && res.type === 'basic') {
-            const copy = res.clone();
-            caches.open(CACHE).then((c) => c.put(request, copy));
-          }
-          return res;
-        })
-        .catch(() => cached);
-      return cached || fetched;
-    })
+    fetch(request)
+      .then((res) => {
+        if (res && res.status === 200 && res.type === 'basic') {
+          const copy = res.clone();
+          caches.open(CACHE).then((c) => c.put(request, copy));
+        }
+        return res;
+      })
+      .catch(() => caches.match(request))
   );
 });
