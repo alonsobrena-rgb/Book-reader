@@ -41,6 +41,7 @@
   const fabPrev     = document.getElementById('fabPrev');
   const fabNext     = document.getElementById('fabNext');
   const offlineToggle = document.getElementById('offlineToggle');
+  const offlineVoiceSelect = document.getElementById('offlineVoiceSelect');
   const audioEl     = document.getElementById('ttsAudio');
   const libraryBtn  = document.getElementById('libraryBtn');
   const libOverlay  = document.getElementById('libOverlay');
@@ -843,10 +844,27 @@
    *    controles en la pantalla de bloqueo (Media Session API).
    * ==================================================================== */
 
-  // Voces femeninas por idioma (modelos Piper de rhasspy/piper-voices).
+  // Catálogo de voces offline (modelos Piper de rhasspy/piper-voices).
+  const OFFLINE_VOICE_OPTIONS = {
+    es: [
+      { id: 'es_ES-sharvard-medium', label: 'Sharvard ♀ · España' },
+      { id: 'es_MX-claude-high', label: 'Claude ♀ · México (alta)' },
+      { id: 'es_AR-daniela-high', label: 'Daniela ♀ · Argentina (alta)' },
+      { id: 'es_ES-davefx-medium', label: 'Davefx ♂ · España' },
+      { id: 'es_MX-ald-medium', label: 'Ald ♂ · México' },
+    ],
+    en: [
+      { id: 'en_US-hfc_female-medium', label: 'HFC ♀ · US' },
+      { id: 'en_US-amy-medium', label: 'Amy ♀ · US' },
+      { id: 'en_GB-jenny_dioco-medium', label: 'Jenny ♀ · UK' },
+      { id: 'en_US-ryan-high', label: 'Ryan ♂ · US (alta)' },
+      { id: 'en_US-hfc_male-medium', label: 'HFC ♂ · US' },
+    ],
+  };
+  // Voz por defecto por idioma (la primera de cada lista).
   const OFFLINE_VOICES = {
-    es: 'es_ES-sharvard-medium',
-    en: 'en_US-hfc_female-medium',
+    es: OFFLINE_VOICE_OPTIONS.es[0].id,
+    en: OFFLINE_VOICE_OPTIONS.en[0].id,
   };
   // WAV silencioso válido para "desbloquear" el reproductor dentro de un gesto
   // (necesario para que luego se pueda reproducir tras la descarga/generación).
@@ -868,7 +886,39 @@
   const offline = { module: null, loading: null, prefetch: null, lastUrl: null, expectingEnd: false };
 
   function isOffline() { return state.engine === 'offline'; }
-  function offlineVoiceId() { return OFFLINE_VOICES[langSelect.value] || OFFLINE_VOICES.es; }
+  function offlineVoiceId() {
+    return offlineVoiceSelect.value || OFFLINE_VOICES[langSelect.value] || OFFLINE_VOICES.es;
+  }
+
+  // Rellena el selector de voces offline según el idioma y restaura la guardada.
+  function populateOfflineVoices() {
+    const lang = langSelect.value;
+    const opts = OFFLINE_VOICE_OPTIONS[lang] || OFFLINE_VOICE_OPTIONS.es;
+    offlineVoiceSelect.innerHTML = '';
+    opts.forEach((o) => {
+      const el = document.createElement('option');
+      el.value = o.id;
+      el.textContent = o.label;
+      offlineVoiceSelect.appendChild(el);
+    });
+    let saved = null;
+    try { saved = localStorage.getItem('lector-pdf-ovoice-' + lang); } catch (e) {}
+    offlineVoiceSelect.value = (saved && opts.some((o) => o.id === saved)) ? saved : opts[0].id;
+  }
+
+  offlineVoiceSelect.addEventListener('change', () => {
+    try { localStorage.setItem('lector-pdf-ovoice-' + langSelect.value, offlineVoiceSelect.value); } catch (e) {}
+    offline.prefetch = null; // la voz cambió: invalida lo pre-generado
+    // Si está leyendo con voz offline, reinicia el párrafo actual con la nueva voz.
+    if (isOffline() && state.isReading && state.currentIndex >= 0) {
+      offline.expectingEnd = false;
+      try { audioEl.pause(); } catch (e) {}
+      state.isPaused = false;
+      ensureOfflineVoice()
+        .then(() => { if (state.isReading) speakParagraph(state.currentIndex); })
+        .catch(() => {});
+    }
+  });
 
   // Indicador de estado visible (para ver en qué paso va o qué falla).
   let statusEl = null;
@@ -1185,6 +1235,7 @@
   langSelect.addEventListener('change', () => {
     try { localStorage.setItem('lector-pdf-lang', langSelect.value); } catch (e) {}
     populateVoiceSelect();
+    populateOfflineVoices();
     if (state.isReading) stopReading();
   });
 
@@ -1586,6 +1637,9 @@
     if (savedRate && !isNaN(parseFloat(savedRate))) rateSlider.value = savedRate;
   } catch (e) {}
   rateValue.textContent = `${parseFloat(rateSlider.value).toFixed(1)}x`;
+
+  // Rellena el selector de voces offline.
+  populateOfflineVoices();
 
   // Restaura el motor de voz elegido (sistema u offline).
   try {
