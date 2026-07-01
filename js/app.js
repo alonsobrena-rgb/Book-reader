@@ -162,6 +162,14 @@
   if (typeof synth.onvoiceschanged !== 'undefined') {
     synth.onvoiceschanged = loadVoices;
   }
+  // Algunos navegadores exponen las voces con retraso: reintenta unos segundos.
+  let voiceTries = 0;
+  const voicePoll = setInterval(() => {
+    loadVoices();
+    if ((state.voices && state.voices.length > 1) || ++voiceTries > 12) {
+      clearInterval(voicePoll);
+    }
+  }, 500);
 
   /* ====================================================================
    * 2. CARGA Y RENDER DEL PDF
@@ -1483,7 +1491,7 @@
   menuBtn.addEventListener('click', () => {
     const open = menuPanel.classList.toggle('is-open');
     menuBtn.classList.toggle('is-active', open);
-    if (open) closeSearch();
+    if (open) { closeSearch(); loadVoices(); } // refresca voces (por si instalaste nuevas)
   });
 
   searchToggle.addEventListener('click', () => {
