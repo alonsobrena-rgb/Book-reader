@@ -109,12 +109,25 @@
     populateVoiceSelect();
   }
 
+  let voiceInfoEl = null;
+  function showVoiceCount() {
+    if (!voiceInfoEl) {
+      voiceInfoEl = document.createElement('div');
+      voiceInfoEl.className = 'field__label';
+      voiceInfoEl.style.opacity = '0.8';
+      voiceInfoEl.style.marginTop = '4px';
+      voiceSelect.parentElement.appendChild(voiceInfoEl);
+    }
+    voiceInfoEl.textContent = `${state.voices.length} voces del sistema detectadas`;
+  }
+
   function populateVoiceSelect() {
     const lang = langSelect.value; // 'es' | 'en'
     const matching = state.voices.filter((v) =>
       v.lang.toLowerCase().startsWith(lang)
     );
 
+    showVoiceCount();
     voiceSelect.innerHTML = '';
 
     if (matching.length === 0) {
