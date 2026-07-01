@@ -435,7 +435,25 @@
       const right = Math.max(...ln.items.map((i) => i.right));
       const top = Math.min(...ln.items.map((i) => i.top));
       const bottom = Math.max(...ln.items.map((i) => i.bottom));
-      const text = ln.items.map((i) => i.str).join(' ').replace(/\s+/g, ' ').trim();
+
+      // Une los fragmentos según la distancia real entre ellos: si el hueco es
+      // pequeño, se pegan (evita leer letra por letra); si es de palabra, se
+      // separa con un espacio.
+      let text = '';
+      let prev = null;
+      for (const it of ln.items) {
+        if (prev) {
+          const gap = it.left - prev.right;
+          const spaceW = Math.max(prev.height, it.height) * 0.2;
+          const endsWithSpace = /\s$/.test(text);
+          const startsWithSpace = /^\s/.test(it.str);
+          if (gap > spaceW && !endsWithSpace && !startsWithSpace) text += ' ';
+        }
+        text += it.str;
+        prev = it;
+      }
+      text = text.replace(/\s+/g, ' ').trim();
+
       const height = bottom - top;
       return { text, left, right, top, bottom, height };
     });
