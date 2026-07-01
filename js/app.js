@@ -345,6 +345,24 @@
    * 3. AGRUPACIÓN DE TEXTO EN PÁRRAFOS
    * ==================================================================== */
 
+  // Limpia el texto para que la voz no lea las tildes como "acento agudo".
+  // Muchos PDFs guardan el acento como carácter suelto (´) separado de la
+  // vocal; aquí se vuelve a pegar (á) y se quitan marcas sobrantes.
+  function cleanText(text) {
+    let t = text
+      // Acentos "sueltos" (con espacio) -> marcas combinantes.
+      .replace(/´/g, '́')  // ´ agudo
+      .replace(/¨/g, '̈')  // ¨ diéresis
+      .replace(/˜/g, '̃'); // ˜ tilde (ñ)
+    // Si la marca quedó ANTES de la letra, muévela después para poder unir.
+    t = t.replace(/([́̃̈])([A-Za-zÑñ])/g, '$2$1');
+    // Une base + marca combinante (a + ´ = á).
+    t = t.normalize('NFC');
+    // Elimina cualquier marca combinante que haya quedado suelta.
+    t = t.replace(/[̀-ͯ]/g, '');
+    return t;
+  }
+
   function buildParagraphs(textContent, viewport, pageNum) {
     // Convierte cada item en una caja con posición en coordenadas de viewport.
     const boxes = [];
@@ -445,7 +463,7 @@
 
     // Guarda cada párrafo en la lista global de lectura.
     for (const p of paras) {
-      const text = p.lines.join(' ').replace(/\s+/g, ' ').trim();
+      const text = cleanText(p.lines.join(' ').replace(/\s+/g, ' ').trim());
       if (text.length < 2) continue;
       const pad = 4;
       // box en unidades de escala 1; al posicionar se multiplica por la escala.
