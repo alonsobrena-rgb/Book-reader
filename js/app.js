@@ -123,42 +123,43 @@
 
   function populateVoiceSelect() {
     const lang = langSelect.value; // 'es' | 'en'
-    const matching = state.voices.filter((v) =>
-      v.lang.toLowerCase().startsWith(lang)
-    );
-
     showVoiceCount();
     voiceSelect.innerHTML = '';
 
-    if (matching.length === 0) {
+    if (!state.voices.length) {
       const opt = document.createElement('option');
-      opt.textContent = 'No hay voces disponibles para este idioma';
+      opt.textContent = 'No hay voces disponibles';
       opt.value = '';
       voiceSelect.appendChild(opt);
       return;
     }
 
-    // Las voces femeninas primero.
-    matching.sort((a, b) => {
+    // Muestra TODAS las voces, pero ordena: idioma actual primero, luego
+    // femeninas, luego por nombre. Así aparecen las 92, no solo 2.
+    const all = state.voices.slice().sort((a, b) => {
+      const la = a.lang.toLowerCase().startsWith(lang) ? 0 : 1;
+      const lb = b.lang.toLowerCase().startsWith(lang) ? 0 : 1;
+      if (la !== lb) return la - lb;
       const fa = isLikelyFemale(a) ? 0 : 1;
       const fb = isLikelyFemale(b) ? 0 : 1;
-      return fa - fb;
+      if (fa !== fb) return fa - fb;
+      return a.name.localeCompare(b.name);
     });
 
-    matching.forEach((v) => {
+    all.forEach((v) => {
       const opt = document.createElement('option');
       opt.value = v.name;
-      opt.textContent = `${v.name} (${v.lang})${isLikelyFemale(v) ? ' ♀' : ''}`;
+      const inLang = v.lang.toLowerCase().startsWith(lang);
+      opt.textContent = `${inLang ? '★ ' : ''}${v.name} (${v.lang})${isLikelyFemale(v) ? ' ♀' : ''}`;
       voiceSelect.appendChild(opt);
     });
 
-    // Selecciona la voz guardada para este idioma si está disponible; si no,
-    // la primera (femenina si existe).
+    // Selecciona la voz guardada si existe; si no, la primera del idioma actual.
     let savedVoice = null;
     try { savedVoice = localStorage.getItem('lector-pdf-voice-' + lang); } catch (e) {}
-    voiceSelect.value = (savedVoice && matching.some((v) => v.name === savedVoice))
+    voiceSelect.value = (savedVoice && all.some((v) => v.name === savedVoice))
       ? savedVoice
-      : matching[0].name;
+      : all[0].name;
   }
 
   function getSelectedVoice() {
@@ -370,17 +371,15 @@
   // Muchos PDFs guardan el acento como carácter suelto (´) separado de la
   // vocal; aquí se vuelve a pegar (á) y se quitan marcas sobrantes.
   function cleanText(text) {
-    let t = text
-      // Acentos "sueltos" (con espacio) -> marcas combinantes.
-      .replace(/´/g, '́')  // ´ agudo
-      .replace(/¨/g, '̈')  // ¨ diéresis
-      .replace(/˜/g, '̃'); // ˜ tilde (ñ)
-    // Si la marca quedó ANTES de la letra, muévela después para poder unir.
-    t = t.replace(/([́̃̈])([A-Za-zÑñ])/g, '$2$1');
-    // Une base + marca combinante (a + ´ = á).
-    t = t.normalize('NFC');
-    // Elimina cualquier marca combinante que haya quedado suelta.
-    t = t.replace(/[̀-ͯ]/g, '');
+    // 1) Une los acentos ya bien colocados (á precompuesta o a+´ combinante).
+    let t = text.normalize('NFC');
+    // 2) Convierte acentos "sueltos" (con espacio) a marcas combinantes.
+    t = t.replace(/´|ˊ/g, '́').replace(/¨/g, '̈').replace(/˜/g, '̃');
+    // 3) Adjunta esas marcas sueltas a la letra vecina (aunque haya espacios).
+    t = t.replace(/([A-Za-zÑñ])[ \t]*([̀-ͯ])/g, '$1$2');
+    t = t.replace(/([̀-ͯ])[ \t]*([A-Za-zÑñ])/g, '$2$1');
+    // 4) Une base + marca (a + ´ = á) y elimina marcas que queden sueltas.
+    t = t.normalize('NFC').replace(/[̀-ͯ]/g, '');
     return t;
   }
 
