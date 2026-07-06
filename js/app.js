@@ -11,9 +11,8 @@
 (() => {
   'use strict';
 
-  // ---- PDF.js worker ----
-  pdfjsLib.GlobalWorkerOptions.workerSrc =
-    'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+  // ---- PDF.js worker (local, para funcionar sin internet) ----
+  pdfjsLib.GlobalWorkerOptions.workerSrc = 'vendor/pdf.worker.min.js';
 
   // ---- Elementos del DOM ----
   const fileInput   = document.getElementById('fileInput');

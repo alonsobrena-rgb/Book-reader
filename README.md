@@ -82,8 +82,13 @@ Abre esa URL en el navegador del celular y:
 - **Android (Chrome):** menú ⋮ → **Añadir a pantalla de inicio** / **Instalar app**.
 - **iPhone (Safari):** botón **Compartir** ⬆️ → **Añadir a pantalla de inicio**.
 
-Quedará un ícono como el de una app normal, abre a pantalla completa y la
-interfaz se guarda sin conexión (los PDFs los eliges tú cada vez).
+Quedará un ícono como el de una app normal, abre a pantalla completa y
+**funciona sin internet** (PDF.js va incluido en la carpeta `vendor/`): puedes
+leer con la voz del sistema, usar la biblioteca, la búsqueda y el zoom sin
+conexión. Los PDFs los eliges tú cada vez.
+
+> La **voz offline (Piper)** necesita internet solo la **primera vez** para
+> descargar su modelo; después también funciona sin conexión.
 
 > 💡 En el celular las voces dependen del sistema. Android suele traer voces
 > femeninas de Google en español e inglés; iPhone trae las voces de Siri.

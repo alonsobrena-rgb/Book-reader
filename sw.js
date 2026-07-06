@@ -1,11 +1,13 @@
-/* Service Worker: cachea la "app shell" para que funcione como app instalada.
- * Los PDFs no se cachean; PDF.js (CDN) se sirve desde la red. */
-const CACHE = 'lector-pdf-v25';
+/* Service Worker: cachea toda la app (incluido PDF.js local) para que funcione
+ * 100% sin internet una vez instalada. Los PDFs los abre el usuario. */
+const CACHE = 'lector-pdf-v26';
 const SHELL = [
   './',
   './index.html',
   './css/styles.css',
   './js/app.js',
+  './vendor/pdf.min.js',
+  './vendor/pdf.worker.min.js',
   './manifest.webmanifest',
   './icons/icon-192.png',
   './icons/icon-512.png',
