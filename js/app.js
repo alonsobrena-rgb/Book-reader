@@ -799,7 +799,7 @@
     state.isPaused = false;
     if (isOffline()) {
       try { audioEl.pause(); } catch (e) {}
-      offline.prefetch = null;
+      clearOfflineCache();
     } else {
       synth.cancel();          // corta la locución actual (se ignora "canceled")
     }
@@ -822,7 +822,7 @@
     if (synth.speaking || synth.pending) synth.cancel();
     offline.expectingEnd = false;
     try { audioEl.pause(); } catch (e) {}
-    offline.prefetch = null;
+    clearOfflineCache();
     // Conserva el estado si es un error (para poder leerlo); si no, lo oculta.
     if (statusEl && !statusEl.classList.contains('tts-status--error')) setStatus(null);
     clearHighlight();
@@ -938,7 +938,8 @@
   }
   let silentUrl = null;
 
-  const offline = { module: null, loading: null, prefetch: null, lastUrl: null, expectingEnd: false };
+  const offline = { module: null, loading: null, cache: new Map(), expectingEnd: false };
+  const PREFETCH_AHEAD = 3; // nº de frases pre-generadas (colchón para bloqueado)
 
   function isOffline() { return state.engine === 'offline'; }
   function offlineVoiceId() {
@@ -963,7 +964,7 @@
 
   offlineVoiceSelect.addEventListener('change', () => {
     try { localStorage.setItem('lector-pdf-ovoice-' + langSelect.value, offlineVoiceSelect.value); } catch (e) {}
-    offline.prefetch = null; // la voz cambió: invalida lo pre-generado
+    clearOfflineCache(); // la voz cambió: invalida lo pre-generado
     // Si está leyendo con voz offline, reinicia el párrafo actual con la nueva voz.
     if (isOffline() && state.isReading && state.currentIndex >= 0) {
       offline.expectingEnd = false;
@@ -1057,11 +1058,13 @@
     const text = chunks[ci];
     let url;
     try {
-      if (offline.prefetch && offline.prefetch.key === text) {
-        url = await offline.prefetch.promise;
+      if (offline.cache.has(text)) {
+        url = await offline.cache.get(text);
       } else {
         setStatus('Generando audio…');
-        url = await synthOffline(text);
+        const pr = synthOffline(text);
+        offline.cache.set(text, pr.catch(() => null));
+        url = await pr;
       }
     } catch (e) {
       console.warn('Fallo al generar voz offline:', e);
@@ -1072,11 +1075,6 @@
     if (!url) { setStatus('La voz no devolvió audio.', true); stopReading(); return; }
     if (!state.isReading || state.isPaused || !isOffline()) return;
 
-    if (offline.lastUrl && offline.lastUrl !== url) {
-      try { URL.revokeObjectURL(offline.lastUrl); } catch (e) {}
-    }
-    offline.lastUrl = url;
-
     setMediaSession();
     audioEl.src = url;
     audioEl.playbackRate = clamp(parseFloat(rateSlider.value), 0.5, 2.5);
@@ -1085,7 +1083,7 @@
       offline.expectingEnd = true; // este sí es audio real: al terminar, avanza
       await audioEl.play();
       setStatus('🔊 Leyendo (voz offline)');
-      prefetchNextUnit(); // adelanta el siguiente para que no haya silencios
+      prefetchAhead(PREFETCH_AHEAD); // pre-genera varias frases (colchón)
     } catch (err) {
       // Autoplay bloqueado: deja en pausa para que el siguiente toque reanude.
       console.warn('play() falló:', err);
@@ -1096,24 +1094,46 @@
     }
   }
 
-  // Texto del siguiente fragmento (dentro del párrafo o el inicio del próximo).
-  function nextUnitText() {
+  // Devuelve los textos de las próximas k unidades (frases) desde la posición.
+  function upcomingUnitTexts(k) {
+    const texts = [];
     const chunks = state.currentChunks || [];
-    const ci = state.currentChunkIndex + 1;
-    if (ci < chunks.length) return chunks[ci];
-    const np = state.currentIndex + 1;
-    if (np < state.paragraphs.length) {
-      const c = chunkText(state.paragraphs[np].text);
-      return c[0] || null;
+    let ci = state.currentChunkIndex + 1;
+    while (ci < chunks.length && texts.length < k) { texts.push(chunks[ci]); ci++; }
+    let p = state.currentIndex + 1;
+    while (texts.length < k && p < state.paragraphs.length) {
+      const c = chunkText(state.paragraphs[p].text);
+      for (const t of c) { if (texts.length < k) texts.push(t); }
+      p++;
     }
-    return null;
+    return texts;
   }
 
-  function prefetchNextUnit() {
-    const text = nextUnitText();
-    if (!text) { offline.prefetch = null; return; }
-    if (offline.prefetch && offline.prefetch.key === text) return;
-    offline.prefetch = { key: text, promise: synthOffline(text).catch(() => null) };
+  // Pre-genera (y cachea) las próximas k frases y libera las que ya no sirven.
+  function prefetchAhead(k) {
+    const texts = upcomingUnitTexts(k);
+    for (const t of texts) {
+      if (!offline.cache.has(t)) offline.cache.set(t, synthOffline(t).catch(() => null));
+    }
+    // Conserva la actual + las próximas; revoca y descarta el resto.
+    const keep = new Set(texts);
+    const cur = (state.currentChunks || [])[state.currentChunkIndex];
+    if (cur) keep.add(cur);
+    for (const key of Array.from(offline.cache.keys())) {
+      if (!keep.has(key)) {
+        const p = offline.cache.get(key);
+        offline.cache.delete(key);
+        Promise.resolve(p).then((u) => { if (u) { try { URL.revokeObjectURL(u); } catch (e) {} } });
+      }
+    }
+  }
+
+  // Libera todo el audio pre-generado (al parar, saltar o cambiar de voz).
+  function clearOfflineCache() {
+    for (const p of offline.cache.values()) {
+      Promise.resolve(p).then((u) => { if (u) { try { URL.revokeObjectURL(u); } catch (e) {} } });
+    }
+    offline.cache.clear();
   }
 
   // Al terminar un fragmento de audio, avanza al siguiente.

@@ -1,6 +1,6 @@
 /* Service Worker: cachea toda la app (incluido PDF.js local) para que funcione
  * 100% sin internet una vez instalada. Los PDFs los abre el usuario. */
-const CACHE = 'lector-pdf-v26';
+const CACHE = 'lector-pdf-v27';
 const SHELL = [
   './',
   './index.html',
