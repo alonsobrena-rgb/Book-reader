@@ -782,6 +782,7 @@
       if (isOffline()) {
         offline.expectingEnd = false;
         try { audioEl.pause(); } catch (e) {}
+        setMediaPlaybackState('paused');
       } else if (synth.speaking || synth.pending) {
         // Corta la locución; al reanudar se relee desde el fragmento guardado
         // (más fiable que synth.pause()/resume(), roto en móvil).
@@ -823,6 +824,7 @@
     offline.expectingEnd = false;
     try { audioEl.pause(); } catch (e) {}
     clearOfflineCache();
+    setMediaPlaybackState('none');
     // Conserva el estado si es un error (para poder leerlo); si no, lo oculta.
     if (statusEl && !statusEl.classList.contains('tts-status--error')) setStatus(null);
     clearHighlight();
@@ -1082,6 +1084,7 @@
     try {
       offline.expectingEnd = true; // este sí es audio real: al terminar, avanza
       await audioEl.play();
+      setMediaPlaybackState('playing');
       setStatus('🔊 Leyendo (voz offline)');
       prefetchAhead(PREFETCH_AHEAD); // pre-genera varias frases (colchón)
     } catch (err) {
@@ -1157,15 +1160,23 @@
   function setMediaSession() {
     if (!('mediaSession' in navigator)) return;
     try {
-      navigator.mediaSession.metadata = new MediaMetadata({
-        title: state.currentDocName || 'Lectura',
-        artist: 'Lector de PDF',
+      const ms = navigator.mediaSession;
+      const para = state.paragraphs[state.currentIndex];
+      ms.metadata = new MediaMetadata({
+        title: (para ? para.text.slice(0, 60) : 'Lectura'),
+        artist: state.currentDocName || 'Lector de PDF',
+        album: 'Lector de PDF',
       });
-      navigator.mediaSession.setActionHandler('play', () => startReading());
-      navigator.mediaSession.setActionHandler('pause', () => pauseReading());
-      navigator.mediaSession.setActionHandler('nexttrack', () => skipParagraph(1));
-      navigator.mediaSession.setActionHandler('previoustrack', () => skipParagraph(-1));
+      ms.setActionHandler('play', () => startReading());
+      ms.setActionHandler('pause', () => pauseReading());
+      ms.setActionHandler('nexttrack', () => skipParagraph(1));
+      ms.setActionHandler('previoustrack', () => skipParagraph(-1));
+      ms.setActionHandler('stop', () => stopReading());
     } catch (e) {}
+  }
+
+  function setMediaPlaybackState(s) {
+    try { if ('mediaSession' in navigator) navigator.mediaSession.playbackState = s; } catch (e) {}
   }
 
   // Interruptor de motor de voz.

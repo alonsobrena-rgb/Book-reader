@@ -1,0 +1,8 @@
+# Dependencias de desarrollo/pruebas (no forman parte de la app publicada)
+node_modules/
+package.json
+package-lock.json
+
+# Archivos temporales de prueba
+*.tmp
+test.pdf
