@@ -1037,6 +1037,22 @@
     return URL.createObjectURL(wav);
   }
 
+  // Espera un resultado mostrando el tiempo transcurrido; si tarda más de
+  // GEN_TIMEOUT, corta con error (para que no se quede colgado "eternamente").
+  const GEN_TIMEOUT = 60000;
+  function awaitWithProgress(promise) {
+    let secs = 0;
+    let done = false;
+    setStatus('Generando audio… (0s)');
+    const timer = setInterval(() => {
+      secs++;
+      if (!done) setStatus(`Generando audio… (${secs}s)`);
+    }, 1000);
+    const timeout = new Promise((_, rej) =>
+      setTimeout(() => rej(new Error('la generación tardó demasiado')), GEN_TIMEOUT));
+    return Promise.race([promise, timeout]).finally(() => { done = true; clearInterval(timer); });
+  }
+
   // Habilita el elemento <audio> dentro del gesto del usuario (autoplay).
   function unlockAudio() {
     try {
@@ -1060,17 +1076,21 @@
     const text = chunks[ci];
     let url;
     try {
+      let gen;
       if (offline.cache.has(text)) {
-        url = await offline.cache.get(text);
+        gen = offline.cache.get(text);
       } else {
-        setStatus('Generando audio…');
-        const pr = synthOffline(text);
-        offline.cache.set(text, pr.catch(() => null));
-        url = await pr;
+        gen = synthOffline(text);
+        offline.cache.set(text, gen.catch(() => null));
       }
+      // Muestra el tiempo transcurrido y corta si tarda demasiado (no cuelga).
+      url = await awaitWithProgress(gen);
     } catch (e) {
       console.warn('Fallo al generar voz offline:', e);
-      setStatus('No se pudo generar la voz: ' + (e && e.message || e), true);
+      const slow = e && /tardó demasiado/.test(e.message || '');
+      setStatus(slow
+        ? 'La voz offline va muy lenta en este teléfono. Prueba la voz del sistema (desactiva "Voz offline").'
+        : 'No se pudo generar la voz: ' + (e && e.message || e), true);
       stopReading();
       return;
     }

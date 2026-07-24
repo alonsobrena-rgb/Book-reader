@@ -1,6 +1,6 @@
 /* Service Worker: cachea toda la app (incluido PDF.js local) para que funcione
  * 100% sin internet una vez instalada. Los PDFs los abre el usuario. */
-const CACHE = 'lector-pdf-v28';
+const CACHE = 'lector-pdf-v29';
 const SHELL = [
   './',
   './index.html',
@@ -29,6 +29,17 @@ self.addEventListener('activate', (event) => {
   );
 });
 
+// Añade cabeceras de aislamiento de origen para habilitar el procesamiento
+// multi-núcleo (SharedArrayBuffer) y acelerar la voz offline. 'credentialless'
+// permite cargar recursos de terceros (modelo de voz) que envíen CORS.
+function withCOI(res) {
+  if (!res) return res;
+  const headers = new Headers(res.headers);
+  headers.set('Cross-Origin-Opener-Policy', 'same-origin');
+  headers.set('Cross-Origin-Embedder-Policy', 'credentialless');
+  return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
+}
+
 self.addEventListener('fetch', (event) => {
   const { request } = event;
   if (request.method !== 'GET') return;
@@ -39,16 +50,15 @@ self.addEventListener('fetch', (event) => {
   if (url.origin !== self.location.origin) return;
 
   // Estrategia: RED PRIMERO (para recibir siempre la última versión), con
-  // respaldo en caché si no hay conexión.
+  // respaldo en caché si no hay conexión. Se añaden cabeceras de aislamiento.
   event.respondWith(
     fetch(request)
       .then((res) => {
         if (res && res.status === 200 && res.type === 'basic') {
-          const copy = res.clone();
-          caches.open(CACHE).then((c) => c.put(request, copy));
+          caches.open(CACHE).then((c) => c.put(request, res.clone()));
         }
-        return res;
+        return withCOI(res);
       })
-      .catch(() => caches.match(request))
+      .catch(() => caches.match(request).then((r) => withCOI(r)))
   );
 });

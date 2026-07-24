@@ -140,10 +140,19 @@
   <!-- Registro del Service Worker (PWA) -->
   <script>
     if ('serviceWorker' in navigator) {
-      window.addEventListener('load', () => {
-        navigator.serviceWorker.register('sw.js').catch((err) =>
-          console.warn('No se pudo registrar el Service Worker:', err)
-        );
+      window.addEventListener('load', async () => {
+        try {
+          await navigator.serviceWorker.register('sw.js');
+          // Aislar el origen acelera la voz offline (multi-núcleo); requiere
+          // una única recarga para que el SW aplique las cabeceras.
+          if (!self.crossOriginIsolated && navigator.serviceWorker.controller
+              && !sessionStorage.getItem('coiReloaded')) {
+            sessionStorage.setItem('coiReloaded', '1');
+            location.reload();
+          }
+        } catch (err) {
+          console.warn('No se pudo registrar el Service Worker:', err);
+        }
       });
     }
   </script>

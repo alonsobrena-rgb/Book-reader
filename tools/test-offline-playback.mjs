@@ -72,17 +72,10 @@ async function main() {
   await page.route('**/@diffusionstudio/vits-web**', (route) =>
     route.fulfill({ status: 200, contentType: 'text/javascript', body: MOCK_TTS }));
 
-  await page.goto(base + '/', { waitUntil: 'load' });
+  // Evita la recarga por aislamiento de origen durante la prueba.
+  await page.addInitScript(() => { try { sessionStorage.setItem('coiReloaded', '1'); } catch (e) {} });
 
-  // Instrumenta Media Session para poder verificarla.
-  await page.addInitScript(() => {});
-  await page.evaluate(() => {
-    window.__ms = { playbackState: null, metaTitle: null, handlers: {} };
-    try {
-      const ms = navigator.mediaSession;
-      const origPlay = Object.getOwnPropertyDescriptor(MediaSession.prototype, 'playbackState');
-    } catch (e) {}
-  });
+  await page.goto(base + '/', { waitUntil: 'load' });
 
   const results = [];
   const check = (name, cond, extra = '') => {
