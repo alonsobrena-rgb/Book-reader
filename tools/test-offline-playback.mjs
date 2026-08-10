@@ -98,6 +98,27 @@ async function main() {
   const paraCount = await page.evaluate(() => document.querySelectorAll('.page').length);
   check('PDF cargado (páginas renderizadas)', paraCount > 0, 'páginas=' + paraCount);
 
+  // Modo oscuro del PDF: activa y comprueba clase + filtro en el lienzo.
+  await page.waitForFunction(() => document.querySelector('.page canvas'), { timeout: 15000 });
+  await page.evaluate(() => {
+    const t = document.getElementById('darkPdfToggle');
+    t.checked = true; t.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  const dark = await page.evaluate(() => {
+    const hasClass = document.body.classList.contains('pdf-dark');
+    const c = document.querySelector('.page canvas');
+    const filter = c ? getComputedStyle(c).filter : 'none';
+    return { hasClass, filter, saved: localStorage.getItem('lector-pdf-dark') };
+  });
+  check('Modo oscuro del PDF activa clase', dark.hasClass, 'clase=' + dark.hasClass);
+  check('Modo oscuro aplica filtro al lienzo', /invert/.test(dark.filter), 'filter=' + dark.filter);
+  check('Modo oscuro se guarda', dark.saved === '1', 'saved=' + dark.saved);
+  // Desactiva para que no afecte el resto de la prueba.
+  await page.evaluate(() => {
+    const t = document.getElementById('darkPdfToggle');
+    t.checked = false; t.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+
   // 3) Pulsa el botón flotante Leer (gesto de usuario real).
   await page.click('#fab');
 

@@ -40,6 +40,7 @@
   const fabPrev     = document.getElementById('fabPrev');
   const fabNext     = document.getElementById('fabNext');
   const offlineToggle = document.getElementById('offlineToggle');
+  const darkPdfToggle = document.getElementById('darkPdfToggle');
   const offlineVoiceSelect = document.getElementById('offlineVoiceSelect');
   const audioEl     = document.getElementById('ttsAudio');
   const libraryBtn  = document.getElementById('libraryBtn');
@@ -1200,6 +1201,13 @@
   }
 
   // Interruptor de motor de voz.
+  // Modo oscuro del PDF: oscurece las hojas (invierte el lienzo).
+  function applyDarkPdf(on) {
+    document.body.classList.toggle('pdf-dark', !!on);
+    try { localStorage.setItem('lector-pdf-dark', on ? '1' : '0'); } catch (e) {}
+  }
+  darkPdfToggle.addEventListener('change', () => applyDarkPdf(darkPdfToggle.checked));
+
   offlineToggle.addEventListener('change', () => {
     state.engine = offlineToggle.checked ? 'offline' : 'system';
     try { localStorage.setItem('lector-pdf-engine', state.engine); } catch (e) {}
@@ -1753,6 +1761,14 @@
       state.engine = 'offline';
       offlineToggle.checked = true;
       loadTtsModule().catch(() => {});
+    }
+  } catch (e) {}
+
+  // Restaura el modo oscuro del PDF.
+  try {
+    if (localStorage.getItem('lector-pdf-dark') === '1') {
+      darkPdfToggle.checked = true;
+      applyDarkPdf(true);
     }
   } catch (e) {}
 

@@ -157,6 +157,16 @@ input[type="range"] {
   border-radius: 2px;
 }
 
+/* Modo oscuro del PDF: invierte el lienzo (blanco -> oscuro, negro -> claro).
+   El hue-rotate compensa para que los colores no queden "en negativo". */
+body.pdf-dark .page {
+  background: #1b1c20;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.6);
+}
+body.pdf-dark .page canvas {
+  filter: invert(1) hue-rotate(180deg);
+}
+
 .page__placeholder {
   position: absolute;
   inset: 0;
