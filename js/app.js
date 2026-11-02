@@ -654,6 +654,7 @@
       return;
     }
 
+    startMediaKeys(); // botón de pausa de audífonos / pantalla de bloqueo
     startKeepAlive();
     startWatchdog();
     speakParagraph(startIndex);
@@ -675,7 +676,7 @@
       if (idx < 0) { stopReading(); return; }
       offline.expectingEnd = false;
       if (isOffline()) unlockAudio();
-      else { startKeepAlive(); startWatchdog(); }
+      else { startMediaKeys(); startKeepAlive(); startWatchdog(); }
       speakParagraph(idx);
       return;
     }
@@ -692,6 +693,7 @@
       return;
     }
 
+    startMediaKeys();
     startKeepAlive();
     startWatchdog();
     const chunks = (state.currentChunks && state.currentChunks.length)
@@ -716,7 +718,7 @@
     state.currentChunkIndex = 0;
 
     if (isOffline()) offlinePlayUnit();
-    else speakChunks(chunks, 0, index);
+    else { setMediaSession(); speakChunks(chunks, 0, index); }
   }
 
   function speakChunks(chunks, ci, pIndex) {
@@ -789,6 +791,7 @@
         // (más fiable que synth.pause()/resume(), roto en móvil).
         synth.cancel();
       }
+      if (!isOffline()) pauseMediaKeys();
       updateControls();
     }
   }
@@ -804,6 +807,7 @@
       clearOfflineCache();
     } else {
       synth.cancel();          // corta la locución actual (se ignora "canceled")
+      startMediaKeys();        // si estaba en pausa, vuelve a "reproduciendo"
     }
     speakParagraph(idx);       // empieza a leer desde el nuevo párrafo
     updateControls();
@@ -825,6 +829,7 @@
     offline.expectingEnd = false;
     try { audioEl.pause(); } catch (e) {}
     clearOfflineCache();
+    stopMediaKeys();
     setMediaPlaybackState('none');
     // Conserva el estado si es un error (para poder leerlo); si no, lo oculta.
     if (statusEl && !statusEl.classList.contains('tts-status--error')) setStatus(null);
@@ -1189,7 +1194,12 @@
         album: 'Lector de PDF',
       });
       ms.setActionHandler('play', () => startReading());
-      ms.setActionHandler('pause', () => pauseReading());
+      ms.setActionHandler('pause', () => {
+        // Algunos audífonos envían "pausa" como alternar: si ya está en
+        // pausa, reanuda.
+        if (state.isReading && !state.isPaused) pauseReading();
+        else startReading();
+      });
       ms.setActionHandler('nexttrack', () => skipParagraph(1));
       ms.setActionHandler('previoustrack', () => skipParagraph(-1));
       ms.setActionHandler('stop', () => stopReading());
@@ -1199,6 +1209,76 @@
   function setMediaPlaybackState(s) {
     try { if ('mediaSession' in navigator) navigator.mediaSession.playbackState = s; } catch (e) {}
   }
+
+  /* ---- Botón de pausa de los audífonos con la voz del sistema ----
+   * La síntesis de voz del navegador (Web Speech) no es "audio" para el
+   * sistema, así que los botones de los audífonos (Bluetooth o con cable) y
+   * de la pantalla de bloqueo no le llegan. Para recibirlos se reproduce en
+   * bucle un audio prácticamente silencioso mientras se lee: así la página
+   * tiene una sesión multimedia activa y el sistema envía play/pausa/siguiente
+   * a los manejadores de Media Session (los mismos que usa la voz offline).
+   */
+  const mediaKeyEl = new Audio();
+  mediaKeyEl.loop = true;
+  mediaKeyEl.preload = 'auto';
+  mediaKeyEl.setAttribute('playsinline', '');
+  let mediaKeyUrl = null;
+  let mediaKeyRetries = 0;
+
+  // WAV de ~10s casi silencioso (Chrome solo muestra controles multimedia
+  // para audio de 5s o más). Lleva un ruido de 1 bit, inaudible, para que no
+  // se trate como "sin sonido".
+  function makeMediaKeyWavUrl() {
+    const sampleRate = 8000, samples = sampleRate * 10;
+    const buf = new ArrayBuffer(44 + samples);
+    const dv = new DataView(buf);
+    const w = (o, str) => { for (let i = 0; i < str.length; i++) dv.setUint8(o + i, str.charCodeAt(i)); };
+    w(0, 'RIFF'); dv.setUint32(4, 36 + samples, true); w(8, 'WAVE');
+    w(12, 'fmt '); dv.setUint32(16, 16, true); dv.setUint16(20, 1, true); dv.setUint16(22, 1, true);
+    dv.setUint32(24, sampleRate, true); dv.setUint32(28, sampleRate, true);
+    dv.setUint16(32, 1, true); dv.setUint16(34, 8, true); // PCM 8 bits (128 = silencio)
+    w(36, 'data'); dv.setUint32(40, samples, true);
+    for (let i = 0; i < samples; i++) dv.setUint8(44 + i, i % 2 ? 128 : 129);
+    return URL.createObjectURL(new Blob([buf], { type: 'audio/wav' }));
+  }
+
+  function startMediaKeys() {
+    if (isOffline()) return; // la voz offline ya usa su propio <audio>
+    mediaKeyRetries = 0;
+    try {
+      if (!mediaKeyUrl) mediaKeyUrl = makeMediaKeyWavUrl();
+      if (mediaKeyEl.src !== mediaKeyUrl) mediaKeyEl.src = mediaKeyUrl;
+      mediaKeyEl.muted = false; // si está silenciado el sistema no le da controles
+      mediaKeyEl.volume = 1;
+      const p = mediaKeyEl.play();
+      if (p && p.catch) p.catch(() => {});
+    } catch (e) {}
+    setMediaSession();
+    setMediaPlaybackState('playing');
+  }
+
+  function pauseMediaKeys() {
+    try { mediaKeyEl.pause(); } catch (e) {}
+    setMediaPlaybackState('paused'); // el siguiente botón será "reanudar"
+  }
+
+  function stopMediaKeys() {
+    try { mediaKeyEl.pause(); } catch (e) {}
+  }
+
+  // Si el sistema detiene el audio silencioso por su cuenta (p. ej. otra app
+  // tomó el audio un momento) mientras seguimos leyendo, intenta retomarlo
+  // unas pocas veces para no perder los botones de los audífonos.
+  mediaKeyEl.addEventListener('pause', () => {
+    if (isOffline() || !state.isReading || state.isPaused) return;
+    if (mediaKeyRetries >= 3) return;
+    mediaKeyRetries++;
+    setTimeout(() => {
+      if (isOffline() || !state.isReading || state.isPaused || !mediaKeyEl.paused) return;
+      const p = mediaKeyEl.play();
+      if (p && p.catch) p.catch(() => {});
+    }, 500);
+  });
 
   // Interruptor de motor de voz.
   // Modo oscuro del PDF: oscurece las hojas (invierte el lienzo).
@@ -1391,6 +1471,14 @@
 
   // Atajo: barra espaciadora para leer/pausar (si no se escribe en un campo).
   document.addEventListener('keydown', (e) => {
+    // Tecla multimedia Play/Pausa (teclados y algunos audífonos), solo si el
+    // navegador no la envía ya por Media Session (evita doble alternado).
+    if (e.key === 'MediaPlayPause' && !('mediaSession' in navigator)) {
+      e.preventDefault();
+      if (state.isReading && !state.isPaused) pauseReading();
+      else startReading();
+      return;
+    }
     if (e.target !== document.body) return;
     if (e.code === 'Space') {
       e.preventDefault();

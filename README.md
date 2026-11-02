@@ -33,6 +33,11 @@ no necesita servidor ni instalación.
   bloqueo. Se activa con el interruptor del menú; descarga el modelo de voz la
   primera vez (necesita internet esa vez).
 - ⌨️ Atajo: barra espaciadora para leer / pausar.
+- 🎧 **Botón de los audífonos**: el botón de pausa/play de los audífonos
+  (Bluetooth o con cable) pausa y reanuda la lectura, igual que en Spotify;
+  el doble toque (siguiente pista) salta al párrafo siguiente. Funciona con la
+  voz del sistema y con la voz offline. También aparecen los controles en la
+  pantalla de bloqueo / notificaciones.
 
 ## 🚀 Cómo usar
 
