@@ -99,6 +99,21 @@ async function main() {
   check('Lee con la voz del sistema', s.spoken > 0, 'locuciones=' + s.spoken);
   check('Audio silencioso activo (sesión multimedia)', s.silentPlaying === true);
   check('playbackState = playing', s.playback === 'playing', s.playback);
+  // El audio de fondo debe ser silencio absoluto (si no, se oye un pitido).
+  const silence = await page.evaluate(async () => {
+    const buf = await (await fetch(window.__mk.src)).arrayBuffer();
+    const dv = new DataView(buf);
+    const bits = dv.getUint16(34, true);
+    const zero = bits === 8 ? 128 : 0;
+    let maxDev = 0;
+    for (let i = 44; i < buf.byteLength; i += bits / 8) {
+      const v = bits === 8 ? dv.getUint8(i) : dv.getInt16(i, true);
+      maxDev = Math.max(maxDev, Math.abs(v - zero));
+    }
+    return { bits, maxDev, secs: (buf.byteLength - 44) / (dv.getUint32(28, true)) };
+  });
+  check('Audio de fondo es silencio absoluto (sin pitido)', silence.maxDev === 0, JSON.stringify(silence));
+  check('Audio de fondo dura 5s o más', silence.secs >= 5, silence.secs + 's');
   check('Manejadores de Media Session registrados',
     ['play', 'pause', 'nexttrack', 'previoustrack', 'stop'].every((h) => s.handlers.includes(h)),
     s.handlers.join(','));

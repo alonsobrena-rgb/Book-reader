@@ -1214,7 +1214,7 @@
    * La síntesis de voz del navegador (Web Speech) no es "audio" para el
    * sistema, así que los botones de los audífonos (Bluetooth o con cable) y
    * de la pantalla de bloqueo no le llegan. Para recibirlos se reproduce en
-   * bucle un audio prácticamente silencioso mientras se lee: así la página
+   * bucle un audio totalmente silencioso mientras se lee: así la página
    * tiene una sesión multimedia activa y el sistema envía play/pausa/siguiente
    * a los manejadores de Media Session (los mismos que usa la voz offline).
    */
@@ -1225,20 +1225,20 @@
   let mediaKeyUrl = null;
   let mediaKeyRetries = 0;
 
-  // WAV de ~10s casi silencioso (Chrome solo muestra controles multimedia
-  // para audio de 5s o más). Lleva un ruido de 1 bit, inaudible, para que no
-  // se trate como "sin sonido".
+  // WAV de ~10s de silencio absoluto (todas las muestras en cero). Chrome
+  // solo muestra controles multimedia para audio de 5s o más. Debe ser
+  // silencio total: cualquier "ruido" mínimo se oye como un pitido agudo.
   function makeMediaKeyWavUrl() {
     const sampleRate = 8000, samples = sampleRate * 10;
-    const buf = new ArrayBuffer(44 + samples);
+    const dataSize = samples * 2;                 // PCM 16 bits mono
+    const buf = new ArrayBuffer(44 + dataSize);   // datos ya en cero = silencio
     const dv = new DataView(buf);
     const w = (o, str) => { for (let i = 0; i < str.length; i++) dv.setUint8(o + i, str.charCodeAt(i)); };
-    w(0, 'RIFF'); dv.setUint32(4, 36 + samples, true); w(8, 'WAVE');
+    w(0, 'RIFF'); dv.setUint32(4, 36 + dataSize, true); w(8, 'WAVE');
     w(12, 'fmt '); dv.setUint32(16, 16, true); dv.setUint16(20, 1, true); dv.setUint16(22, 1, true);
-    dv.setUint32(24, sampleRate, true); dv.setUint32(28, sampleRate, true);
-    dv.setUint16(32, 1, true); dv.setUint16(34, 8, true); // PCM 8 bits (128 = silencio)
-    w(36, 'data'); dv.setUint32(40, samples, true);
-    for (let i = 0; i < samples; i++) dv.setUint8(44 + i, i % 2 ? 128 : 129);
+    dv.setUint32(24, sampleRate, true); dv.setUint32(28, sampleRate * 2, true);
+    dv.setUint16(32, 2, true); dv.setUint16(34, 16, true);
+    w(36, 'data'); dv.setUint32(40, dataSize, true);
     return URL.createObjectURL(new Blob([buf], { type: 'audio/wav' }));
   }
 
